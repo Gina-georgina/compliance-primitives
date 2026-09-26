@@ -92,6 +92,22 @@ impl JurisdictionFlag {
     }
 
     /// Assign the compliance-officer role. Issuer-only.
+    ///
+    /// The officer role grants access to exactly one entry point:
+    /// [`set_jurisdiction`](Self::set_jurisdiction), which is guarded by
+    /// `require_compliance_authority` (issuer *or* officer). Every other
+    /// mutating entry point is guarded by `require_issuer` and therefore
+    /// remains issuer-only, including:
+    ///
+    /// - [`remove_jurisdiction_multiple`](Self::remove_jurisdiction_multiple)
+    /// - [`pause`](Self::pause) / [`unpause`](Self::unpause)
+    /// - [`upgrade`](Self::upgrade)
+    /// - [`set_compliance_officer`](Self::set_compliance_officer) /
+    ///   [`revoke_compliance_officer`](Self::revoke_compliance_officer)
+    ///
+    /// There are no `_until` or multiple-address variants of
+    /// `set_jurisdiction`; the officer role does not extend to any other
+    /// function.
     pub fn set_compliance_officer(
         env: Env,
         issuer: Address,
@@ -105,6 +121,15 @@ impl JurisdictionFlag {
     }
 
     /// Revoke the compliance-officer role. Issuer-only.
+    ///
+    /// After revocation, the officer no longer satisfies
+    /// `require_compliance_authority`, so the only entry point it previously
+    /// unlocked — [`set_jurisdiction`](Self::set_jurisdiction) — reverts to
+    /// issuer-only access. All other mutating entry points
+    /// ([`remove_jurisdiction_multiple`](Self::remove_jurisdiction_multiple),
+    /// [`pause`](Self::pause), [`unpause`](Self::unpause),
+    /// [`upgrade`](Self::upgrade)) were already issuer-only via
+    /// `require_issuer` and are unaffected.
     pub fn revoke_compliance_officer(env: Env, issuer: Address) -> Result<(), Error> {
         Self::require_issuer(&env, &issuer)?;
         env.storage()
@@ -251,12 +276,6 @@ impl JurisdictionFlag {
     fn extend_jurisdiction_ttl(env: &Env, key: &DataKey) {
         env.storage()
             .persistent()
-            .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
-    }
-}
+            .exten
 
-#[cfg(test)]
-mod test;
-
-#[cfg(test)]
-mod fuzz;
+/* … truncated 98 chars — edit only what you need near the top … */
