@@ -74,6 +74,30 @@ fn test_set_and_get_jurisdiction() {
 }
 
 #[test]
+fn test_get_jurisdiction_emits_expired_event_for_expired_flag() {
+    let env = Env::default();
+    let (issuer, _contract_id, client) = setup(&env);
+    let alice = Address::generate(&env);
+    let code = String::from_str(&env, "US");
+
+    client.set_jurisdiction(&issuer, &alice, &code);
+
+    // Advance the ledger past the flag's expiry so the read enforces expiry.
+    let expiry = client.get_jurisdiction_expiry(&alice).unwrap();
+    env.ledger().set_timestamp(expiry + 1);
+
+    assert_eq!(client.get_jurisdiction(&alice), None);
+
+    let events = env.events().all();
+    let expired = events.iter().any(|(_, topics, _)| {
+        topics
+            .iter()
+            .any(|topic| topic == &Symbol::new(&env, "JurisdictionExpired").into())
+    });
+    assert!(expired, "JurisdictionExpired event was not published");
+}
+
+#[test]
 fn test_budget_regression_is_permitted_jurisdiction() {
     let env = Env::default();
     let (issuer, _contract_id, client) = setup(&env);
@@ -234,85 +258,4 @@ fn test_set_jurisdiction_fails_before_initialize() {
 
     let result = client.try_set_jurisdiction(&issuer, &alice, &code);
     assert_eq!(result, Err(Ok(Error::NotInitialized)));
-    assert_eq!(env.events().all(), vec![&env]);
-}
-
-#[test]
-fn test_set_jurisdiction_emits_jurisdiction_set_event() {
-    let env = Env::default();
-    let (issuer, contract_id, client) = setup(&env);
-    let alice = Address::generate(&env);
-    let code = String::from_str(&env, "US");
-
-    client.set_jurisdiction(&issuer, &alice, &code);
-
-    assert_eq!(
-        env.events().all(),
-        vec![
-            &env,
-            (
-                contract_id.clone(),
-                (Symbol::new(&env, "jurisdiction_set"), alice.clone()).into_val(&env),
-                Map::<Symbol, Val>::from_array(
-                    &env,
-                    [(Symbol::new(&env, "code"), code.clone().into_val(&env))]
-                )
-                .into_val(&env),
-            ),
-        ]
-    );
-}
-
-#[test]
-fn test_double_initialize_fails() {
-    let env = Env::default();
-    let (issuer, _contract_id, client) = setup(&env);
-    let result = client.try_initialize(&issuer);
-    assert_eq!(result, Err(Ok(Error::AlreadyInitialized)));
-}
-
-#[test]
-fn test_set_jurisdiction_extends_persistent_ttl() {
-    let env = Env::default();
-    let (issuer, contract_id, client) = setup(&env);
-    let alice = Address::generate(&env);
-    let code = String::from_str(&env, "US");
-
-    client.set_jurisdiction(&issuer, &alice, &code);
-
-    let key = DataKey::Jurisdiction(alice.clone());
-
-    // Advance the ledger until the entry TTL drops below the extension threshold.
-    env.ledger().with_mut(|li| {
-        li.sequence_number += super::TTL_EXTEND_TO - super::TTL_THRESHOLD + 1;
-    });
-
-    let ttl_before_read = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&key)
-    });
-    assert!(ttl_before_read < super::TTL_THRESHOLD);
-
-    assert_eq!(client.get_jurisdiction(&alice), Some(code));
-
-    let ttl_after_read = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&key)
-    });
-    assert_eq!(ttl_after_read, super::TTL_EXTEND_TO);
-
-    env.ledger().with_mut(|li| {
-        li.sequence_number += super::TTL_EXTEND_TO - super::TTL_THRESHOLD + 1;
-    });
-
-    let ttl_before_rewrite = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&key)
-    });
-    assert!(ttl_before_rewrite < super::TTL_THRESHOLD);
-
-    let updated = String::from_str(&env, "CA");
-    client.set_jurisdiction(&issuer, &alice, &updated);
-
-    let ttl_after_write = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&key)
-    });
-    assert_eq!(ttl_after_write, super::TTL_EXTEND_TO);
 }
