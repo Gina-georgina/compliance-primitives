@@ -1,4 +1,4 @@
-.PHONY: test doctest clippy fmt fmt-check lint build check-wasm-size check-accessibility
+.PHONY: test doctest clippy fmt fmt-check lint build check-wasm-size check-accessibility check-contracterror-discriminants
 
 # Mirrors the "cargo test" CI job (.github/workflows/ci.yml).
 test:
@@ -19,7 +19,10 @@ fmt-check:
 	cargo fmt --all -- --check
 
 # Full local lint pass: clippy (as run in CI) plus a formatting check.
-lint: clippy fmt-check
+lint: clippy fmt-check check-contracterror-discriminants
+
+check-contracterror-discriminants:
+	python3 scripts/check-contracterror-discriminants.py
 
 # Mirrors the "wasm32v1-none build" CI job.
 build:

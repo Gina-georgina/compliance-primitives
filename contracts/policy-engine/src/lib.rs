@@ -74,6 +74,13 @@ pub trait CircuitBreakerInterface {
     fn is_frozen(env: Env) -> bool;
 }
 
+/// Describes the `allowlist-token` contract interface used for the policy
+/// engine's allowlist check.
+#[contractclient(name = "AllowlistCheckClient")]
+pub trait AllowlistCheckInterface {
+    fn is_allowed(env: Env, address: Address) -> bool;
+}
+
 // ---------------------------------------------------------------------------
 // Storage types
 // ---------------------------------------------------------------------------
@@ -128,7 +135,7 @@ pub enum CheckKind {
 
 /// How the engine combines the results of multiple checks.
 #[contracttype]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CombineOp {
     /// AND — every check must pass. Used when an address must satisfy all
     /// compliance requirements simultaneously.
@@ -145,6 +152,14 @@ pub enum CombineOp {
 pub struct AddressPair {
     pub from: Address,
     pub to: Address,
+}
+
+/// Snapshot of the configured policy tree for inspection and auditing.
+#[contracttype]
+#[derive(Clone)]
+pub struct PolicyNode {
+    pub op: CombineOp,
+    pub checks: Vec<CheckKind>,
 }
 
 #[contracttype]
@@ -184,6 +199,7 @@ pub enum Error {
     /// exceed `MAX_CHECKS`. Keeps per-evaluation resource cost bounded and
     /// prevents unbounded storage growth.
     MaxDepthExceeded = 5,
+    ContractPaused = 6,
 }
 
 /// Maximum number of checks that can be registered in a single policy
@@ -312,6 +328,15 @@ impl PolicyEngine {
             .ok_or(Error::NotInitialized)?;
         checks.remove(index);
         env.storage().instance().set(&DataKey::Checks, &checks);
+        Ok(())
+    }
+
+    /// Remove every configured check in one call. Admin-only.
+    pub fn clear_checks(env: Env, admin: Address) -> Result<(), Error> {
+        compliance_pausable::require_not_paused_or(&env, Error::ContractPaused)?;
+        Self::require_admin(&env, &admin)?;
+        let empty: Vec<CheckKind> = Vec::new(&env);
+        env.storage().instance().set(&DataKey::Checks, &empty);
         Ok(())
     }
 

@@ -76,7 +76,7 @@ fn setup_engine_all_three<'a>(
     let admin = Address::generate(env);
     let engine_id = env.register(PolicyEngine, ());
     let client = PolicyEngineClient::new(env, &engine_id);
-    client.initialize(&admin, &CombineOp::All);
+    client.initialize(&admin, &CombineOp::All, &None);
 
     client.add_check(
         &admin,
@@ -341,7 +341,7 @@ fn test_or_semantics_any_check_passes() {
     let engine_admin = Address::generate(&env);
     let engine_id = env.register(PolicyEngine, ());
     let engine = PolicyEngineClient::new(&env, &engine_id);
-    engine.initialize(&engine_admin, &CombineOp::Any);
+    engine.initialize(&engine_admin, &CombineOp::Any, &None);
 
     engine.add_check(
         &engine_admin,

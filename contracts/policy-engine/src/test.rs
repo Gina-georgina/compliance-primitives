@@ -1,10 +1,12 @@
 use super::*;
+use crate::test_utils::{
+    MockDenylist, MockDenylistClient, MockJurisdiction, MockJurisdictionClient,
+};
 use circuit_breaker::{CircuitBreaker, CircuitBreakerClient as CbClient};
 use denylist_gate::{DenylistGate, DenylistGateClient};
 use jurisdiction_flag::{JurisdictionFlag, JurisdictionFlagClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{vec, Env, String};
-use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -204,6 +206,34 @@ fn test_add_and_remove_check() {
     assert_eq!(client.get_checks().len(), 1);
 }
 
+#[test]
+fn test_clear_checks_resets_policy_to_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let deny_id = setup_denylist(&env);
+    let juri_id = setup_jurisdiction(&env);
+
+    let (admin, _engine_id, client) = setup_engine_all(&env);
+    client.add_check(
+        &admin,
+        &CheckKind::Denylist(DenylistCheck {
+            contract: deny_id.clone(),
+        }),
+    );
+    client.add_check(
+        &admin,
+        &CheckKind::Jurisdiction(JurisdictionCheck {
+            contract: juri_id.clone(),
+            allowed_codes: vec![&env, String::from_str(&env, "US")],
+        }),
+    );
+
+    assert_eq!(client.get_checks().len(), 2);
+    client.clear_checks(&admin);
+    assert_eq!(client.get_checks().len(), 0);
+}
+
 /// `get_policy` returns a `PolicyNode` whose `op` and `checks` fields exactly
 /// match what was configured via `initialize` / `add_check`.
 #[test]
@@ -214,8 +244,8 @@ fn test_get_policy_matches_configuration() {
     // Set up two external contracts to use as checks.
     let deny_admin = Address::generate(&env);
     let juri_issuer = Address::generate(&env);
-    let deny_id = setup_denylist(&env, &deny_admin);
-    let juri_id = setup_jurisdiction(&env, &juri_issuer);
+    let deny_id = setup_denylist(&env);
+    let juri_id = setup_jurisdiction(&env);
 
     // Initialise with `Any` semantics and add two checks.
     let (admin, _engine_id, client) = setup_engine_any(&env);
@@ -224,16 +254,16 @@ fn test_get_policy_matches_configuration() {
 
     client.add_check(
         &admin,
-        &CheckKind::Denylist {
+        &CheckKind::Denylist(DenylistCheck {
             contract: deny_id.clone(),
-        },
+        }),
     );
     client.add_check(
         &admin,
-        &CheckKind::Jurisdiction {
+        &CheckKind::Jurisdiction(JurisdictionCheck {
             contract: juri_id.clone(),
             allowed_codes: allowed_codes.clone(),
-        },
+        }),
     );
 
     // Fetch the full policy tree.
@@ -247,18 +277,15 @@ fn test_get_policy_matches_configuration() {
 
     // First check must be the denylist check with the correct contract address.
     match policy.checks.get(0).unwrap() {
-        CheckKind::Denylist { contract } => assert_eq!(contract, deny_id),
+        CheckKind::Denylist(inner) => assert_eq!(inner.contract, deny_id),
         _ => panic!("expected Denylist check at index 0"),
     }
 
     // Second check must be the jurisdiction check with correct contract and codes.
     match policy.checks.get(1).unwrap() {
-        CheckKind::Jurisdiction {
-            contract,
-            allowed_codes: codes,
-        } => {
-            assert_eq!(contract, juri_id);
-            assert_eq!(codes, allowed_codes);
+        CheckKind::Jurisdiction(inner) => {
+            assert_eq!(inner.contract, juri_id);
+            assert_eq!(inner.allowed_codes, allowed_codes);
         }
         _ => panic!("expected Jurisdiction check at index 1"),
     }

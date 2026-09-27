@@ -174,6 +174,7 @@ pub enum Error {
     NoChecksRegistered = 4,
     EmptyAddressList = 5,
     BatchTooLarge = 6,
+    ContractPaused = 7,
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +314,20 @@ impl ComplianceAggregator {
     /// Returns the currently registered `jurisdiction-flag` address, if any.
     pub fn jurisdiction_flag(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::JurisdictionFlag)
+    }
+
+    /// Returns whether a denylist-gate check and/or a jurisdiction-flag check
+    /// are configured without requiring two separate view calls.
+    pub fn get_checks_summary(env: Env) -> (bool, bool) {
+        let denylist_gate: Option<Address> = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::DenylistGate);
+        let jurisdiction_flag: Option<Address> = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::JurisdictionFlag);
+        (denylist_gate.is_some(), jurisdiction_flag.is_some())
     }
 
     /// Returns the currently registered `circuit-breaker` address, if any.

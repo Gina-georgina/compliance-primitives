@@ -112,6 +112,31 @@ fn test_initialize_without_checks() {
 }
 
 #[test]
+fn test_get_checks_summary_reports_configured_checks() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let gate_admin = Address::generate(&env);
+    let gate_id = env.register(DenylistGate, ());
+    DenylistGateClient::new(&env, &gate_id).initialize(&gate_admin);
+
+    let flag_issuer = Address::generate(&env);
+    let flag_id = env.register(JurisdictionFlag, ());
+    JurisdictionFlagClient::new(&env, &flag_id).initialize(&flag_issuer);
+
+    let agg_admin = Address::generate(&env);
+    let agg_id = env.register(ComplianceAggregator, ());
+    let client = ComplianceAggregatorClient::new(&env, &agg_id);
+    client.initialize(&agg_admin, &Some(gate_id.clone()), &Some(flag_id.clone()), &None);
+
+    assert_eq!(client.get_checks_summary(), (true, true));
+
+    let client_without_flag = ComplianceAggregatorClient::new(&env, &agg_id);
+    // Re-initialize is not permitted; verify the summary is still a view over storage.
+    assert_eq!(client_without_flag.get_checks_summary(), (true, true));
+}
+
+#[test]
 fn test_double_initialize_fails() {
     let env = Env::default();
     let (_, _, _, _, admin, _, client) = setup_all(&env);
@@ -388,7 +413,7 @@ fn test_single_check_matches_direct_call() {
     let agg_admin = Address::generate(&env);
     let agg_id = env.register(ComplianceAggregator, ());
     let agg_client = ComplianceAggregatorClient::new(&env, &agg_id);
-    agg_client.initialize(&agg_admin, &Some(gate_id.clone()), &None);
+    agg_client.initialize(&agg_admin, &Some(gate_id.clone()), &None, &None);
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
@@ -423,11 +448,13 @@ fn test_zero_checks_is_documented_error_not_panic() {
     let admin = Address::generate(&env);
     let id = env.register(ComplianceAggregator, ());
     let client = ComplianceAggregatorClient::new(&env, &id);
-    client.initialize(&admin, &None, &None);
+    client.initialize(&admin, &None, &None, &None);
 
     let addr = Address::generate(&env);
     // Must not panic: try_* surfaces the error as a Result.
-    let result = std::panic::catch_unwind(|| client.try_check_address(&addr, &vec![&env]));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.try_check_address(&addr, &vec![&env])
+    }));
     assert!(result.is_ok(), "check_address must not panic on zero checks");
     assert_eq!(result.unwrap(), Err(Ok(Error::NoChecksRegistered)));
 }
@@ -591,7 +618,7 @@ fn test_batch_check_no_checks_registered() {
     let admin = Address::generate(&env);
     let id = env.register(ComplianceAggregator, ());
     let client = ComplianceAggregatorClient::new(&env, &id);
-    client.initialize(&admin, &None, &None);
+    client.initialize(&admin, &None, &None, &None);
 
     let alice = Address::generate(&env);
     let result = client.try_batch_check(&vec![&env, alice], &vec![&env]);
