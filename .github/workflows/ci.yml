@@ -185,6 +185,18 @@ jobs:
       - name: Check CHANGELOG.md and version are in sync
         run: ./scripts/check-changelog.sh
 
+  contract-line-count:
+    name: contract line-count guideline check
+    runs-on: ubuntu-latest
+    # Warning only — a contract growing past ~300 lines gets a visible nudge
+    # without blocking the PR.  Set HARD_FAIL=1 (or remove continue-on-error)
+    # once the guideline is enforced more strictly.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Flag contracts over the ~300-line guideline
+        run: bash scripts/check-contract-line-count.sh
+
   semver-checks:
     name: cargo semver-checks
     runs-on: ubuntu-latest
