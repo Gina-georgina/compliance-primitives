@@ -10,6 +10,45 @@
 //! functions directly, passing your contract's `Env`. No contract struct is
 //! defined here — these are pure utility functions, not an entry-point
 //! contract.
+//!
+//! ## Which contracts use this crate vs. a local pause implementation
+//!
+//! Not every contract in the workspace delegates pause state to this crate.
+//! A reader of this file would otherwise need to grep the workspace to find
+//! out who depends on it — the table below captures that for each primitive.
+//!
+//! | Contract | Pause mechanism | Notes |
+//! |---|---|---|
+//! | `multisig-admin` | **this crate** (`compliance_pausable::*`) | Added when the crate was introduced |
+//! | `compliance-aggregator` | **this crate** (`compliance_pausable::*`) | Added when the crate was introduced |
+//! | `audit-log` | **this crate** (`compliance_pausable::*`) | Added when the crate was introduced |
+//! | `policy-engine` | **this crate** (`compliance_pausable::*`) | Added when the crate was introduced |
+//! | `allowlist-token` | **local** `DataKey::Paused` (inline) | Predates the shared crate; not yet migrated |
+//! | `denylist-gate` | **local** `DataKey::Paused` (inline) | Predates the shared crate; not yet migrated |
+//! | `jurisdiction-flag` | **local** `DataKey::Paused` (inline) | Predates the shared crate; not yet migrated |
+//! | `circuit-breaker` | **not applicable** — uses `DataKey::Frozen` | Freeze semantics differ from pause: `Frozen` is a cross-contract gate, not an admin stop |
+//!
+//! ### Why the three original primitives use local pause state
+//!
+//! `allowlist-token`, `denylist-gate`, and `jurisdiction-flag` were written
+//! before `compliance-pausable` existed. Each inlines its own
+//! `env.storage().instance().set(&DataKey::Paused, &true/false)` logic —
+//! functionally identical to what this crate does, but not going through it.
+//! Migrating them is safe (the storage key and semantics are the same) but
+//! requires a coordinated change across three contracts plus their test
+//! suites; it has been left for a dedicated refactor rather than mixed into
+//! unrelated PRs.
+//!
+//! ### Why `circuit-breaker` is different
+//!
+//! `circuit-breaker` uses `DataKey::Frozen` rather than `DataKey::Paused`
+//! and exposes `freeze`/`unfreeze`/`is_frozen` rather than
+//! `pause`/`unpause`/`is_paused`. This is intentional: freeze is a
+//! *cross-contract emergency gate* that other contracts poll before allowing
+//! a transfer — it is not the same concept as an admin pause on the
+//! circuit-breaker contract itself. The two mechanisms are kept separate to
+//! avoid conflating operational pause (admin maintenance window) with
+//! emergency freeze (halt-all-transfers signal).
 #![no_std]
 
 use soroban_sdk::{contracttype, Env};
