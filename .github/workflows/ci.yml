@@ -67,8 +67,22 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
-      - name: Cache cargo
+      # Explicitly cache the wasm32v1-none target directory in addition to the
+      # native target/ tree.  Swatinem/rust-cache@v2 keys on the host triple by
+      # default; the cross-compiled wasm target lives in a separate subdirectory
+      # (target/wasm32v1-none/) and may not be included in the default cache
+      # entry depending on the runner's Rust sysroot layout.  Setting
+      # `cache-targets: "true"` and adding a shared-key suffix scoped to the
+      # wasm target ensures the release build artifacts are preserved between
+      # runs and avoids a full rebuild on every push.
+      - name: Cache cargo (wasm target)
         uses: Swatinem/rust-cache@v2
+        with:
+          # Scope this cache entry to the wasm target so it doesn't collide
+          # with the native-target entries used by the test/clippy jobs.
+          shared-key: wasm32v1-none
+          # Cache the wasm release artifacts explicitly.
+          cache-targets: "true"
       - name: Build contracts to wasm
         run: cargo build --workspace --target wasm32v1-none --release
 
@@ -81,8 +95,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
-      - name: Cache cargo
+      # Use the same shared-key as the wasm-build job so this job can reuse
+      # the cached wasm32v1-none release artifacts rather than rebuilding them.
+      - name: Cache cargo (wasm target)
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm32v1-none
+          cache-targets: "true"
       - name: Check wasm binary sizes against budget
         run: bash scripts/check-wasm-size.sh
 
