@@ -92,6 +92,7 @@
           <code>add_to_allowlist(admin, address)</code>
           <code>is_allowed(address) -&gt; bool</code>
           <code>transfer(from, to, amount) -&gt; bool</code>
+          <a class="interface-link" href="interfaces.html#allowlist-token">Interface spec &rarr;</a>
         </div>
       </div>
       <div class="card" data-search-item>
@@ -106,6 +107,7 @@
         <div class="fns">
           <code>add_to_denylist(admin, address)</code>
           <code>check(address) -&gt; bool</code>
+          <a class="interface-link" href="interfaces.html#denylist-gate">Interface spec &rarr;</a>
         </div>
       </div>
       <div class="card" data-search-item>
@@ -120,14 +122,15 @@
         <div class="fns">
           <code>set_jurisdiction(issuer, address, code)</code>
           <code>is_permitted_jurisdiction(address, allowed_codes) -&gt; bool</code>
+          <a class="interface-link" href="interfaces.html#jurisdiction-flag">Interface spec &rarr;</a>
         </div>
       </div>
-      <div class="card" data-search-item><h3>audit-log</h3><p>Records compliance decisions and operational events for auditability.</p><span class="tag">auditable</span><div class="fns"><code>record_event(admin, subject, decision)</code></div></div>
-      <div class="card" data-search-item><h3>circuit-breaker</h3><p>Provides an emergency stop when automated or governance-defined conditions are met.</p><span class="tag">emergency control</span><div class="fns"><code>trip(admin)</code><code>is_tripped() -&gt; bool</code></div></div>
-      <div class="card" data-search-item><h3>compliance-aggregator</h3><p>Combines multiple compliance checks into one composable decision point.</p><span class="tag">composition</span><div class="fns"><code>check(address) -&gt; bool</code></div></div>
-      <div class="card" data-search-item><h3>multisig-admin</h3><p>Protects administrative operations with multi-signature approval.</p><span class="tag">governance</span><div class="fns"><code>approve(operation)</code><code>execute(operation)</code></div></div>
-      <div class="card" data-search-item><h3>pausable</h3><p>Exposes a controlled pause state for contracts that need operational safety controls.</p><span class="tag">emergency control</span><div class="fns"><code>pause(admin)</code><code>unpause(admin)</code></div></div>
-      <div class="card" data-search-item><h3>policy-engine</h3><p>Evaluates configurable policy rules before an application permits a transfer.</p><span class="tag">rules</span><div class="fns"><code>evaluate(subject, action) -&gt; bool</code></div></div>
+      <div class="card" data-search-item><h3>audit-log</h3><p>Records compliance decisions and operational events for auditability.</p><span class="tag">auditable</span><div class="fns"><code>record_event(admin, subject, decision)</code><a class="interface-link" href="https://github.com/stellar-compliance-kit/compliance-primitives/blob/main/docs/interfaces/audit-log.md">Interface spec &rarr;</a></div></div>
+      <div class="card" data-search-item><h3>circuit-breaker</h3><p>Provides an emergency stop when automated or governance-defined conditions are met.</p><span class="tag">emergency control</span><div class="fns"><code>trip(admin)</code><code>is_tripped() -&gt; bool</code><a class="interface-link" href="https://github.com/stellar-compliance-kit/compliance-primitives/blob/main/docs/interfaces/circuit-breaker.md">Interface spec &rarr;</a></div></div>
+      <div class="card" data-search-item><h3>compliance-aggregator</h3><p>Combines multiple compliance checks into one composable decision point.</p><span class="tag">composition</span><div class="fns"><code>check(address) -&gt; bool</code><a class="interface-link" href="https://github.com/stellar-compliance-kit/compliance-primitives/blob/main/docs/interfaces/compliance-aggregator.md">Interface spec &rarr;</a></div></div>
+      <div class="card" data-search-item><h3>multisig-admin</h3><p>Protects administrative operations with multi-signature approval.</p><span class="tag">governance</span><div class="fns"><code>approve(operation)</code><code>execute(operation)</code><a class="interface-link" href="https://github.com/stellar-compliance-kit/compliance-primitives/blob/main/docs/interfaces/multisig-admin.md">Interface spec &rarr;</a></div></div>
+      <div class="card" data-search-item><h3>pausable</h3><p>Exposes a controlled pause state for contracts that need operational safety controls.</p><span class="tag">emergency control</span><div class="fns"><code>pause(admin)</code><code>unpause(admin)</code><a class="interface-link" href="https://github.com/stellar-compliance-kit/compliance-primitives/blob/main/docs/interfaces/pausable.md">Interface spec &rarr;</a></div></div>
+      <div class="card" data-search-item><h3>policy-engine</h3><p>Evaluates configurable policy rules before an application permits a transfer.</p><span class="tag">rules</span><div class="fns"><code>evaluate(subject, action) -&gt; bool</code><a class="interface-link" href="https://github.com/stellar-compliance-kit/compliance-primitives/blob/main/docs/interfaces/policy-engine.md">Interface spec &rarr;</a></div></div>
     </div>
   </div>
 </section>

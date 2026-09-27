@@ -509,3 +509,16 @@ img, svg, video, iframe {
     font-size: 28px;
   }
 }
+
+/* Interface spec link inside contract cards */
+.card .fns .interface-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+.card .fns .interface-link:hover {
+  text-decoration: underline;
+}
