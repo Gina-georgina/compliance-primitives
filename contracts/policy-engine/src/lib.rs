@@ -184,6 +184,9 @@ pub enum Error {
     /// exceed `MAX_CHECKS`. Keeps per-evaluation resource cost bounded and
     /// prevents unbounded storage growth.
     MaxDepthExceeded = 5,
+    /// Returned by `swap_checks` when either index `i` or `j` is out of
+    /// range for the current check list.
+    IndexOutOfBounds = 6,
 }
 
 /// Maximum number of checks that can be registered in a single policy
@@ -311,6 +314,38 @@ impl PolicyEngine {
             .get(&DataKey::Checks)
             .ok_or(Error::NotInitialized)?;
         checks.remove(index);
+        env.storage().instance().set(&DataKey::Checks, &checks);
+        Ok(())
+    }
+
+    /// Swap the checks at positions `i` and `j` in the policy list.
+    /// Admin-only.
+    ///
+    /// Issuers can use this to reorder checks without having to remove and
+    /// re-add them (which would also change their indices). A common use case
+    /// is placing the cheapest check first so it short-circuits early under
+    /// `CombineOp::All`, avoiding unnecessary cross-contract calls.
+    ///
+    /// Returns `Err(Error::IndexOutOfBounds)` if either index is out of range.
+    /// No-ops if `i == j`.
+    pub fn swap_checks(env: Env, admin: Address, i: u32, j: u32) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        if i == j {
+            return Ok(());
+        }
+        let mut checks: Vec<CheckKind> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Checks)
+            .ok_or(Error::NotInitialized)?;
+        let len = checks.len();
+        if i >= len || j >= len {
+            return Err(Error::IndexOutOfBounds);
+        }
+        let check_i = checks.get(i).unwrap();
+        let check_j = checks.get(j).unwrap();
+        checks.set(i, check_j);
+        checks.set(j, check_i);
         env.storage().instance().set(&DataKey::Checks, &checks);
         Ok(())
     }
