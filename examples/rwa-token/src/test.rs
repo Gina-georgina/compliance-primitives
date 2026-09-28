@@ -50,7 +50,7 @@ fn setup(env: &Env) -> Fixture<'_> {
 }
 
 fn onboard(env: &Env, fx: &Fixture<'_>, who: &Address, code: &str) {
-    AllowlistTokenClient::new(env, &fx.allowlist_id).add_to_allowlist(&fx.admin, who);
+    AllowlistTokenClient::new(env, &fx.allowlist_id).add_to_allowlist(&fx.admin, who, &None);
     JurisdictionFlagClient::new(env, &fx.jurisdiction_id).set_jurisdiction(
         &fx.issuer,
         who,
@@ -119,7 +119,7 @@ fn test_transfer_blocked_when_jurisdiction_not_permitted() {
     let bob = Address::generate(&env);
     onboard(&env, &fx, &alice, "US");
     // Bob allowlisted but flagged IR, which is outside allowed_codes (US, CA).
-    AllowlistTokenClient::new(&env, &fx.allowlist_id).add_to_allowlist(&fx.admin, &bob);
+    AllowlistTokenClient::new(&env, &fx.allowlist_id).add_to_allowlist(&fx.admin, &bob, &None);
     JurisdictionFlagClient::new(&env, &fx.jurisdiction_id).set_jurisdiction(
         &fx.issuer,
         &bob,

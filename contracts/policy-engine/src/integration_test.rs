@@ -111,7 +111,7 @@ fn onboard(
     who: &Address,
     code: &str,
 ) {
-    AllowlistTokenClient::new(env, allowlist_id).add_to_allowlist(allowlist_admin, who);
+    AllowlistTokenClient::new(env, allowlist_id).add_to_allowlist(allowlist_admin, who, &None);
     JurisdictionFlagClient::new(env, jurisdiction_id)
         .set_jurisdiction(issuer, who, &String::from_str(env, code));
 }
@@ -290,7 +290,7 @@ fn test_fail_jurisdiction_check() {
     );
     // `to` is allowlisted but is in a forbidden jurisdiction.
     AllowlistTokenClient::new(&env, &allowlist_id)
-        .add_to_allowlist(&allowlist_admin, &to);
+        .add_to_allowlist(&allowlist_admin, &to, &None);
     JurisdictionFlagClient::new(&env, &jurisdiction_id)
         .set_jurisdiction(&issuer, &to, &String::from_str(&env, FORBIDDEN_CODE));
 
@@ -326,9 +326,9 @@ fn test_or_semantics_any_check_passes() {
 
     // Both parties are allowlisted (allowlist check will pass).
     AllowlistTokenClient::new(&env, &allowlist_id)
-        .add_to_allowlist(&allowlist_admin, &from);
+        .add_to_allowlist(&allowlist_admin, &from, &None);
     AllowlistTokenClient::new(&env, &allowlist_id)
-        .add_to_allowlist(&allowlist_admin, &to);
+        .add_to_allowlist(&allowlist_admin, &to, &None);
 
     // Both parties are also denylisted (denylist check will fail).
     DenylistGateClient::new(&env, &denylist_id)

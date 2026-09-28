@@ -52,7 +52,7 @@ pub trait ComplianceCheckInterface {
 #[contractclient(name = "AllowlistTokenClient")]
 pub trait AllowlistTokenInterface {
     fn initialize(env: Env, admin: Address, token: Address) -> Result<(), soroban_sdk::contracterror::ContractError>;
-    fn add_to_allowlist(env: Env, admin: Address, address: Address) -> Result<(), soroban_sdk::contracterror::ContractError>;
+    fn add_to_allowlist(env: Env, admin: Address, address: Address, expiration_ledger: Option<u32>) -> Result<(), soroban_sdk::contracterror::ContractError>;
     fn remove_from_allowlist(env: Env, admin: Address, address: Address) -> Result<(), soroban_sdk::contracterror::ContractError>;
     fn is_allowed(env: Env, address: Address) -> bool;
     fn is_compliant(env: Env, address: Address) -> bool;
