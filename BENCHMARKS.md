@@ -404,6 +404,29 @@ Fee impact: ~2 stroops ($0.0000002 at $0.1 per XLM)
 
 **Verdict**: The convenience of policy-engine is worth the negligible cost.
 
+## Multisig-Admin `__check_auth`
+
+`multisig-admin` is benchmarked on `__check_auth`, its hottest entrypoint: the Soroban host invokes it on every admin operation of every primitive that uses the multisig as its admin (e.g. `denylist-gate.add_to_denylist`, `jurisdiction-flag.set_jurisdiction`), as well as on the multisig's own `add_signer`, `remove_signer`, `update_threshold` and `upgrade`.
+
+**Scenario**: 2-of-3 signer set, two approving signatures.
+
+**Resource profile**:
+- 2 instance storage reads (signer set, threshold)
+- O(n²) duplicate-signature scan over the provided signatures
+- O(n·m) membership scan against the stored signer set
+- One `require_auth()` per approving signer
+- One `AuthOk` event
+
+Cost grows with both the number of provided signatures and the size of the signer set, so larger signer sets should be re-measured before deployment.
+
+**Regression gate**: `test_budget_regression_multisig_check_auth` (in `contracts/multisig-admin/src/test.rs`) measures CPU instructions and memory bytes via `env.cost_estimate().budget()` and compares them to the `[multisig-admin.__check_auth]` entry in `budget-baselines.toml`. The CI `budget regression checks` job fails if either value exceeds the baseline by more than 10%. To re-baseline after an intentional change, run:
+
+```bash
+cargo test -p multisig-admin budget_regression -- --nocapture
+```
+
+and copy the printed `cpu` / `memory` values into `budget-baselines.toml`.
+
 ## Conclusion
 
 Compliance primitives add **6-16% overhead** to token transfers, depending on the compliance scope. This is an acceptable trade-off for regulated assets and permissioned systems. The overhead is primarily due to cross-contract call infrastructure, not the compliance logic itself.
