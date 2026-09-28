@@ -109,8 +109,47 @@ pub struct AllowlistCheck {
 /// Each variant carries the address of the external contract that implements
 /// the check plus any parameters that check needs.
 ///
-/// Note: `#[contracttype]` only supports tuple variants (not named struct
-/// variants). Each variant wraps a dedicated parameter struct.
+/// ## `#[contracttype]` enum variant shape restriction
+///
+/// The Soroban SDK's `#[contracttype]` macro (pinned in this workspace) only
+/// supports **unit** or **single-tuple** enum variants. Named-field variants
+/// such as:
+///
+/// ```ignore
+/// // ❌ Does NOT compile with #[contracttype]
+/// pub enum CheckKind {
+///     Jurisdiction { contract: Address, allowed_codes: Vec<String> },
+/// }
+/// ```
+///
+/// are rejected by the macro with a compile error. This is a known limitation
+/// of the XDR-based storage encoding used by Soroban: each variant is stored
+/// as a tagged union, and named fields would require an extra layer of
+/// encoding that the macro does not generate.
+///
+/// **The correct pattern** is to wrap multi-field parameters in a dedicated
+/// `#[contracttype]` struct and use a single-tuple variant:
+///
+/// ```ignore
+/// // ✅ Correct: wrap multi-field params in a struct
+/// #[contracttype]
+/// pub struct JurisdictionCheck {
+///     pub contract: Address,
+///     pub allowed_codes: Vec<String>,
+/// }
+///
+/// #[contracttype]
+/// pub enum CheckKind {
+///     Jurisdiction(JurisdictionCheck),  // single-tuple variant — compiles
+/// }
+/// ```
+///
+/// If you add a new `CheckKind` variant that needs multiple parameters, follow
+/// this same pattern: define a `#[contracttype]` struct for the parameters,
+/// then add a single-tuple variant wrapping that struct. **Do not** attempt to
+/// use named-field variants, even if a future contributor believes the SDK now
+/// supports them — verify against the pinned SDK version in `Cargo.toml`
+/// before changing this shape.
 #[contracttype]
 #[derive(Clone)]
 pub enum CheckKind {
