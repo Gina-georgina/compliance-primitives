@@ -106,3 +106,16 @@ fn test_double_initialize_fails() {
     let result = client.try_initialize(&issuer);
     assert_eq!(result, Err(Ok(Error::AlreadyInitialized)));
 }
+
+#[test]
+fn test_set_jurisdiction_rejects_empty_code() {
+    let env = Env::default();
+    let (issuer, _contract_id, client) = setup(&env);
+    let alice = Address::generate(&env);
+    let empty = String::from_str(&env, "");
+
+    let result = client.try_set_jurisdiction(&issuer, &alice, &empty);
+    assert_eq!(result, Err(Ok(Error::InvalidJurisdictionCode)));
+    assert_eq!(env.events().all(), vec![&env]);
+    assert_eq!(client.get_jurisdiction(&alice), None);
+}

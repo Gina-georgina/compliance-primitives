@@ -40,6 +40,7 @@ pub enum Error {
     NotInitialized = 1,
     AlreadyInitialized = 2,
     NotAuthorized = 3,
+    InvalidJurisdictionCode = 4,
 }
 
 #[contract]
@@ -47,8 +48,20 @@ pub struct JurisdictionFlag;
 
 #[contractimpl]
 impl JurisdictionFlag {
-    /// One-time setup. `issuer` is the only address allowed to set
-    /// jurisdiction codes afterward.
+    /// One-time setup that records `issuer` as the only address allowed to
+    /// set jurisdiction codes afterward.
+    ///
+    /// # Parameters
+    /// - `issuer`: the address that will be authorized to call
+    ///   [`set_jurisdiction`](Self::set_jurisdiction).
+    ///
+    /// # Auth
+    /// Requires `issuer.require_auth()`, so the issuer must sign the
+    /// initialization.
+    ///
+    /// # Errors
+    /// - [`Error::AlreadyInitialized`] if the contract has already been
+    ///   initialized. The existing issuer is left unchanged.
     pub fn initialize(env: Env, issuer: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Issuer) {
             return Err(Error::AlreadyInitialized);
@@ -58,7 +71,26 @@ impl JurisdictionFlag {
         Ok(())
     }
 
-    /// Attach jurisdiction `code` to `address`. Issuer-only.
+    /// Attaches jurisdiction `code` to `address`, overwriting any code
+    /// previously set for it, and emits a [`JurisdictionSet`] event.
+    ///
+    /// # Parameters
+    /// - `issuer`: the caller; must match the issuer recorded by
+    ///   [`initialize`](Self::initialize).
+    /// - `address`: the address whose jurisdiction is being recorded.
+    /// - `code`: the jurisdiction code (e.g. an ISO 3166-1 alpha-2 country
+    ///   code such as `"US"`). Must be non-empty.
+    ///
+    /// # Auth
+    /// Issuer-only. Requires `issuer.require_auth()`.
+    ///
+    /// # Errors
+    /// - [`Error::NotInitialized`] if [`initialize`](Self::initialize) has
+    ///   not been called yet.
+    /// - [`Error::NotAuthorized`] if `issuer` is not the stored issuer.
+    /// - [`Error::InvalidJurisdictionCode`] if `code` is an empty string.
+    ///
+    /// On any error nothing is written to storage and no event is emitted.
     pub fn set_jurisdiction(
         env: Env,
         issuer: Address,
@@ -66,6 +98,9 @@ impl JurisdictionFlag {
         code: String,
     ) -> Result<(), Error> {
         Self::require_issuer(&env, &issuer)?;
+        if code.len() == 0 {
+            return Err(Error::InvalidJurisdictionCode);
+        }
         env.storage()
             .persistent()
             .set(&DataKey::Jurisdiction(address.clone()), &code);
@@ -74,13 +109,43 @@ impl JurisdictionFlag {
     }
 
     /// Returns the jurisdiction code attached to `address`, if any.
+    ///
+    /// # Parameters
+    /// - `address`: the address to look up.
+    ///
+    /// # Returns
+    /// `Some(code)` if a code has been set via
+    /// [`set_jurisdiction`](Self::set_jurisdiction), otherwise `None`.
+    ///
+    /// # Auth
+    /// None. This is a read-only call anyone may make.
+    ///
+    /// # Errors
+    /// Never fails. Works even before the contract is initialized, in which
+    /// case it always returns `None`.
     pub fn get_jurisdiction(env: Env, address: Address) -> Option<String> {
         env.storage().persistent().get(&DataKey::Jurisdiction(address))
     }
 
-    /// Returns `true` if `address` has a jurisdiction code set AND that code
-    /// appears in `allowed_codes`. Meant to be called by other contracts
-    /// that want to restrict activity to a set of permitted jurisdictions.
+    /// Checks whether `address` is in one of the `allowed_codes`
+    /// jurisdictions. Meant to be called by other contracts that want to
+    /// restrict activity to a set of permitted jurisdictions.
+    ///
+    /// # Parameters
+    /// - `address`: the address to check.
+    /// - `allowed_codes`: the jurisdiction codes the caller permits.
+    ///
+    /// # Returns
+    /// `true` only if `address` has a jurisdiction code set AND that code
+    /// appears in `allowed_codes` (exact, case-sensitive match). Returns
+    /// `false` if no code is set or if `allowed_codes` is empty.
+    ///
+    /// # Auth
+    /// None. This is a read-only call anyone may make.
+    ///
+    /// # Errors
+    /// Never fails. Before initialization no codes can have been set, so
+    /// it always returns `false`.
     pub fn is_permitted_jurisdiction(env: Env, address: Address, allowed_codes: Vec<String>) -> bool {
         match Self::get_jurisdiction(env, address) {
             Some(code) => allowed_codes.iter().any(|c| c == code),
