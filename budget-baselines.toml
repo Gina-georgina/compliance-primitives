@@ -6,6 +6,14 @@ memory = 1
 cpu = 1
 memory = 1
 
+[denylist-gate.add_to_denylist_without_audit_log]
+cpu = 1
+memory = 1
+
+[denylist-gate.add_to_denylist_with_audit_log]
+cpu = 1
+memory = 1
+
 [jurisdiction-flag.is_permitted_jurisdiction]
 cpu = 1
 memory = 1
