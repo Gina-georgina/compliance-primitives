@@ -70,6 +70,42 @@ fn test_check_defaults_to_clear() {
 }
 
 #[test]
+fn test_compliance_officer_view_tracks_assignment_and_revocation() {
+    let env = Env::default();
+    let (admin, _contract_id, client) = setup(&env);
+    let officer = Address::generate(&env);
+
+    assert_eq!(client.get_compliance_officer(), None);
+    client.set_compliance_officer(&admin, &officer);
+    assert_eq!(client.get_compliance_officer(), Some(officer));
+    client.revoke_compliance_officer(&admin);
+    assert_eq!(client.get_compliance_officer(), None);
+}
+
+#[test]
+fn bench_add_to_denylist_with_and_without_audit_log() {
+    let env = Env::default();
+    let (admin, _gate_id, client) = setup(&env);
+    let without_audit = Address::generate(&env);
+    env.cost_estimate().budget().reset_default();
+    client.add_to_denylist(&admin, &without_audit);
+    let without_cpu = env.cost_estimate().budget().cpu_instruction_cost();
+    let without_memory = env.cost_estimate().budget().memory_bytes_cost();
+
+    let audit_admin = Address::generate(&env);
+    let audit_id = env.register(audit_log::AuditLog, ());
+    audit_log::AuditLogClient::new(&env, &audit_id).initialize(&audit_admin);
+    client.set_audit_log(&admin, &audit_id);
+    let with_audit = Address::generate(&env);
+    env.cost_estimate().budget().reset_default();
+    client.add_to_denylist(&admin, &with_audit);
+    let with_cpu = env.cost_estimate().budget().cpu_instruction_cost();
+    let with_memory = env.cost_estimate().budget().memory_bytes_cost();
+
+    std::println!("denylist add without audit: cpu={without_cpu} memory={without_memory}; with audit: cpu={with_cpu} memory={with_memory}");
+}
+
+#[test]
 fn test_budget_regression_denylist_check() {
     let env = Env::default();
     let (_admin, _contract_id, client) = setup(&env);
