@@ -263,3 +263,68 @@ fn test_get_policy_matches_configuration() {
         _ => panic!("expected Jurisdiction check at index 1"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// TTL extension
+// ---------------------------------------------------------------------------
+
+fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
+    use soroban_sdk::testutils::storage::Instance as _;
+    env.as_contract(contract_id, || env.storage().instance().get_ttl())
+}
+
+/// A write refreshes the instance TTL, so the policy stays readable after the
+/// ledger advances past the TTL the entries were originally given.
+#[test]
+fn test_write_extends_instance_ttl_past_original_expiry() {
+    use soroban_sdk::testutils::Ledger as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (admin, contract_id, client) = setup_engine_all(&env);
+    let deny_id = setup_denylist(&env);
+
+    // `initialize` is a write path and must extend the TTL.
+    assert_eq!(instance_ttl(&env, &contract_id), INSTANCE_TTL_EXTEND_TO);
+
+    // Advance until the remaining TTL drops below the extension threshold.
+    env.ledger().with_mut(|li| {
+        li.sequence_number += INSTANCE_TTL_EXTEND_TO - INSTANCE_TTL_THRESHOLD + 1;
+    });
+    assert!(instance_ttl(&env, &contract_id) < INSTANCE_TTL_THRESHOLD);
+
+    // A write refreshes the TTL back to the target.
+    client.add_check(
+        &admin,
+        &CheckKind::Denylist(DenylistCheck {
+            contract: deny_id.clone(),
+        }),
+    );
+    assert_eq!(instance_ttl(&env, &contract_id), INSTANCE_TTL_EXTEND_TO);
+
+    // Advance past the ledger at which the original TTL would have expired.
+    env.ledger().with_mut(|li| {
+        li.sequence_number += INSTANCE_TTL_THRESHOLD + 1;
+    });
+
+    // State written before and after the refresh is still readable.
+    assert_eq!(client.get_checks().len(), 1);
+    assert!(client.get_op() == CombineOp::All);
+
+    // Remaining write paths also refresh the TTL. Remaining TTL is currently
+    // EXTEND_TO - THRESHOLD - 1; drop it just below the threshold.
+    env.ledger().with_mut(|li| {
+        li.sequence_number += INSTANCE_TTL_EXTEND_TO - 2 * INSTANCE_TTL_THRESHOLD;
+    });
+    assert!(instance_ttl(&env, &contract_id) < INSTANCE_TTL_THRESHOLD);
+    client.remove_check(&admin, &0);
+    assert_eq!(instance_ttl(&env, &contract_id), INSTANCE_TTL_EXTEND_TO);
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number += INSTANCE_TTL_EXTEND_TO - INSTANCE_TTL_THRESHOLD + 1;
+    });
+    let breaker = Address::generate(&env);
+    client.set_circuit_breaker(&admin, &breaker);
+    assert_eq!(instance_ttl(&env, &contract_id), INSTANCE_TTL_EXTEND_TO);
+    assert_eq!(client.circuit_breaker(), Some(breaker));
+}
