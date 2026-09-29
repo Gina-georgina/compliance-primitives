@@ -44,6 +44,47 @@ Run this after non-trivial changes to `set_jurisdiction` /
 `get_jurisdiction` / `is_permitted_jurisdiction`, or as part of a release
 checklist. Failures print the failing `seed` so the sequence is reproducible.
 
+## circuit-breaker × denylist-gate-consumer (`#465`)
+
+Harness: `examples/denylist-gate-consumer/src/fuzz_test.rs`
+
+Fuzzes the **composition** of `circuit-breaker` and `denylist-gate` inside a
+consumer token's transfer path — the integration-level scenario that
+single-contract harnesses cannot cover.  Random `freeze`/`unfreeze`,
+`add_to_denylist`/`remove_from_denylist`, and `transfer` calls are interleaved
+in arbitrary order.
+
+Invariants checked after every `transfer` attempt:
+
+1. **Frozen gate always blocks** — while `is_frozen()` is `true`, every
+   `transfer` must return `Err(FrozenByBreaker)`.
+2. **Unfrozen + denied still blocks** — `Err(DeniedByGate)` only fires when
+   unfrozen and at least one party is denied.
+3. **Unfrozen + both clear allows** — a `transfer` that returns `Ok(())` must
+   only occur when unfrozen and neither party is denied.
+4. **Balances never mutate through a blocked transfer** — any rejected transfer
+   leaves sender and recipient balances unchanged.
+5. **No panic** — no op sequence causes a host panic.
+
+### Short run (default, also in `cargo test`)
+
+```sh
+cargo test -p denylist-gate-consumer fuzz_circuit_breaker_consumer_composition
+```
+
+Defaults: `FUZZ_ITERATIONS=500`, `FUZZ_OPS=32`.
+
+### Periodic longer campaign (not in CI)
+
+```sh
+FUZZ_ITERATIONS=2000 FUZZ_OPS=64 \
+  cargo test -p denylist-gate-consumer fuzz_circuit_breaker_consumer_composition -- --nocapture
+```
+
+Run this after non-trivial changes to `circuit-breaker`, `denylist-gate`, or
+the consumer transfer path.  Failures print the failing `seed` for
+reproducibility.
+
 ## policy-engine (`#234`)
 
 Harness: `contracts/policy-engine/src/fuzz.rs`
