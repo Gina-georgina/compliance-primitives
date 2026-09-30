@@ -134,6 +134,11 @@ The repository’s `prepublishOnly` hook runs typechecking, lint, build, and tes
 | `ALLOWLIST_CONTRACT_ID` | _(optional)_ | Contract ID of your `allowlist-token` deployment; at least one contract ID is required |
 | `DENYLIST_CONTRACT_ID` | _(empty)_ | Contract ID of your `denylist-gate` deployment |
 | `JURISDICTION_CONTRACT_ID` | _(empty)_ | Contract ID of your `jurisdiction-flag` deployment |
+| `MULTISIG_CONTRACT_ID` | _(empty)_ | Contract ID of your `multisig-admin` deployment |
+| `AGGREGATOR_CONTRACT_ID` | _(empty)_ | Contract ID of your `compliance-aggregator` deployment |
+| `POLICY_ENGINE_CONTRACT_ID` | _(empty)_ | Contract ID of your `policy-engine` deployment |
+| `CIRCUIT_BREAKER_CONTRACT_ID` | _(empty)_ | Contract ID of your `circuit-breaker` deployment |
+| `AUDIT_LOG_CONTRACT_ID` | _(empty)_ | Contract ID of your `audit-log` deployment |
 | `DB_PATH` | _(required)_ | SQLite file path |
 | `POLL_INTERVAL_MS` | `5000` | How often to poll the RPC node; transient failures use exponential backoff |
 | `START_LEDGER` | `0` | Ledger to start from (0 = auto ~24h ago) |
