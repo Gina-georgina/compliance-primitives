@@ -382,7 +382,10 @@ footer .foot-row {
   display: none !important;
 }
 
-/* Explicit user preference overrides the OS default. */
+/* Explicit user preference overrides the OS default.
+ * Dark mode support: prefers-color-scheme is handled by the @media block
+ * above. These overrides allow the manual toggle button to force a theme
+ * independently of the OS setting (stored in localStorage under 'theme'). */
 :root[data-theme="light"] {
   --bg: #ffffff;
   --bg-raised: #f6f7f9;
@@ -390,6 +393,7 @@ footer .foot-row {
   --text: #1a1d23;
   --text-dim: #5b616e;
   --accent: #0060df;
+  --accent-solid: #0060df;
   --accent-bg: #eaf1fd;
   --code-bg: #f6f7f9;
   --code-text: #24292e;
@@ -402,6 +406,7 @@ footer .foot-row {
   --text: #e6e8eb;
   --text-dim: #9aa2ad;
   --accent: #6ea8fe;
+  --accent-solid: #1f6feb;
   --accent-bg: #16233b;
   --code-bg: #151b23;
   --code-text: #d7dbe0;
@@ -541,4 +546,86 @@ img, svg, video, iframe {
 .copy-btn[data-copied="true"] {
   color: #2da44e;
   border-color: #2da44e;
+}
+
+@media print {
+  @page {
+    margin: 18mm;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+    font-size: 10pt;
+  }
+
+  nav,
+  footer,
+  .cta-row,
+  .theme-toggle,
+  .menu-toggle,
+  .search-label,
+  .search-input,
+  .search-empty,
+  .copy-btn {
+    display: none !important;
+  }
+
+  .wrap {
+    max-width: none;
+    padding: 0;
+  }
+
+  header.hero {
+    padding: 0 0 1rem;
+  }
+
+  .badge {
+    display: none;
+  }
+
+  h1 {
+    font-size: 24pt;
+  }
+
+  .lede,
+  section > p {
+    color: #222;
+  }
+
+  section {
+    padding: 1rem 0;
+    border-color: #999;
+    break-inside: avoid;
+  }
+
+  .cards {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .card,
+  .flow,
+  pre.code {
+    background: #fff;
+    border-color: #999;
+    color: #000;
+    break-inside: avoid;
+  }
+
+  .flow,
+  pre.code {
+    overflow: visible;
+  }
+
+  .flow pre,
+  pre.code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  a {
+    color: #000;
+    text-decoration: underline;
+  }
 }

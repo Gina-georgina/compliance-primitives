@@ -18,7 +18,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, Address, Env, String, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype, Address, BytesN, Env,
+    String, Vec,
 };
 
 /// Extend persistent jurisdiction entries when TTL drops below this many ledgers.
@@ -79,8 +80,20 @@ pub struct JurisdictionFlag;
 
 #[contractimpl]
 impl JurisdictionFlag {
-    /// One-time setup. `issuer` is the only address allowed to set
-    /// jurisdiction codes afterward.
+    /// One-time setup that records `issuer` as the only address allowed to
+    /// set jurisdiction codes afterward.
+    ///
+    /// # Parameters
+    /// - `issuer`: the address that will be authorized to call
+    ///   [`set_jurisdiction`](Self::set_jurisdiction).
+    ///
+    /// # Auth
+    /// Requires `issuer.require_auth()`, so the issuer must sign the
+    /// initialization.
+    ///
+    /// # Errors
+    /// - [`Error::AlreadyInitialized`] if the contract has already been
+    ///   initialized. The existing issuer is left unchanged.
     pub fn initialize(env: Env, issuer: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Issuer) {
             return Err(Error::AlreadyInitialized);
@@ -92,6 +105,22 @@ impl JurisdictionFlag {
     }
 
     /// Assign the compliance-officer role. Issuer-only.
+    ///
+    /// The officer role grants access to exactly one entry point:
+    /// [`set_jurisdiction`](Self::set_jurisdiction), which is guarded by
+    /// `require_compliance_authority` (issuer *or* officer). Every other
+    /// mutating entry point is guarded by `require_issuer` and therefore
+    /// remains issuer-only, including:
+    ///
+    /// - [`remove_jurisdiction_multiple`](Self::remove_jurisdiction_multiple)
+    /// - [`pause`](Self::pause) / [`unpause`](Self::unpause)
+    /// - [`upgrade`](Self::upgrade)
+    /// - [`set_compliance_officer`](Self::set_compliance_officer) /
+    ///   [`revoke_compliance_officer`](Self::revoke_compliance_officer)
+    ///
+    /// There are no `_until` or multiple-address variants of
+    /// `set_jurisdiction`; the officer role does not extend to any other
+    /// function.
     pub fn set_compliance_officer(
         env: Env,
         issuer: Address,
@@ -105,6 +134,15 @@ impl JurisdictionFlag {
     }
 
     /// Revoke the compliance-officer role. Issuer-only.
+    ///
+    /// After revocation, the officer no longer satisfies
+    /// `require_compliance_authority`, so the only entry point it previously
+    /// unlocked — [`set_jurisdiction`](Self::set_jurisdiction) — reverts to
+    /// issuer-only access. All other mutating entry points
+    /// ([`remove_jurisdiction_multiple`](Self::remove_jurisdiction_multiple),
+    /// [`pause`](Self::pause), [`unpause`](Self::unpause),
+    /// [`upgrade`](Self::upgrade)) were already issuer-only via
+    /// `require_issuer` and are unaffected.
     pub fn revoke_compliance_officer(env: Env, issuer: Address) -> Result<(), Error> {
         Self::require_issuer(&env, &issuer)?;
         env.storage()
@@ -173,6 +211,20 @@ impl JurisdictionFlag {
     }
 
     /// Returns the jurisdiction code attached to `address`, if any.
+    ///
+    /// # Parameters
+    /// - `address`: the address to look up.
+    ///
+    /// # Returns
+    /// `Some(code)` if a code has been set via
+    /// [`set_jurisdiction`](Self::set_jurisdiction), otherwise `None`.
+    ///
+    /// # Auth
+    /// None. This is a read-only call anyone may make.
+    ///
+    /// # Errors
+    /// Never fails. Works even before the contract is initialized, in which
+    /// case it always returns `None`.
     pub fn get_jurisdiction(env: Env, address: Address) -> Option<String> {
         let key = DataKey::Jurisdiction(address);
         let code: Option<String> = env.storage().persistent().get(&key);
@@ -251,12 +303,6 @@ impl JurisdictionFlag {
     fn extend_jurisdiction_ttl(env: &Env, key: &DataKey) {
         env.storage()
             .persistent()
-            .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
-    }
-}
+            .exten
 
-#[cfg(test)]
-mod test;
-
-#[cfg(test)]
-mod fuzz;
+/* … truncated 98 chars — edit only what you need near the top … */
