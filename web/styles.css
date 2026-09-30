@@ -515,6 +515,39 @@ img, svg, video, iframe {
   }
 }
 
+/* Copy-to-clipboard button on code blocks */
+.code-wrap {
+  position: relative;
+}
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.code-wrap:hover .copy-btn,
+.code-wrap:focus-within .copy-btn {
+  opacity: 1;
+}
+.copy-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.copy-btn[data-copied="true"] {
+  color: #2da44e;
+  border-color: #2da44e;
+}
+
 @media print {
   @page {
     margin: 18mm;
@@ -533,7 +566,8 @@ img, svg, video, iframe {
   .menu-toggle,
   .search-label,
   .search-input,
-  .search-empty {
+  .search-empty,
+  .copy-btn {
     display: none !important;
   }
 
