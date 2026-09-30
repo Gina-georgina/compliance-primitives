@@ -121,6 +121,8 @@ impl JurisdictionFlag {
     /// There are no `_until` or multiple-address variants of
     /// `set_jurisdiction`; the officer role does not extend to any other
     /// function.
+    ///
+    /// Auth: gated by [`require_issuer`] — only the issuer may delegate this role.
     pub fn set_compliance_officer(
         env: Env,
         issuer: Address,
@@ -143,6 +145,8 @@ impl JurisdictionFlag {
     /// [`pause`](Self::pause), [`unpause`](Self::unpause),
     /// [`upgrade`](Self::upgrade)) were already issuer-only via
     /// `require_issuer` and are unaffected.
+    ///
+    /// Auth: gated by [`require_issuer`] — only the issuer may revoke the delegated role.
     pub fn revoke_compliance_officer(env: Env, issuer: Address) -> Result<(), Error> {
         Self::require_issuer(&env, &issuer)?;
         env.storage()
@@ -152,6 +156,8 @@ impl JurisdictionFlag {
     }
 
     /// Pause all mutating operations. Issuer-only.
+    ///
+    /// Auth: gated by [`require_issuer`] — pause/unpause is a lifecycle operation reserved for the issuer.
     pub fn pause(env: Env, issuer: Address) -> Result<(), Error> {
         Self::require_issuer(&env, &issuer)?;
         env.storage().instance().set(&DataKey::Paused, &true);
@@ -163,6 +169,8 @@ impl JurisdictionFlag {
     }
 
     /// Resume all mutating operations. Issuer-only.
+    ///
+    /// Auth: gated by [`require_issuer`] — pause/unpause is a lifecycle operation reserved for the issuer.
     pub fn unpause(env: Env, issuer: Address) -> Result<(), Error> {
         Self::require_issuer(&env, &issuer)?;
         env.storage().instance().set(&DataKey::Paused, &false);
@@ -174,6 +182,9 @@ impl JurisdictionFlag {
     }
 
     /// Attach jurisdiction `code` to `address`. Issuer or compliance-officer.
+    ///
+    /// Auth: gated by [`require_compliance_authority`] — allows either the issuer or a
+    /// delegated compliance officer, so routine flag management does not require the issuer key.
     pub fn set_jurisdiction(
         env: Env,
         issuer: Address,
@@ -195,6 +206,8 @@ impl JurisdictionFlag {
     }
 
     /// Remove stored jurisdiction codes for each address in `addresses`.
+    ///
+    /// Auth: gated by [`require_issuer`] — bulk removal is a privileged operation reserved for the issuer.
     pub fn remove_jurisdiction_multiple(
         env: Env,
         issuer: Address,
@@ -264,6 +277,27 @@ impl JurisdictionFlag {
         Ok(())
     }
 
+    /// Strict single-address auth gate — only the address stored as `issuer`
+    /// at [`initialize`] time may pass.
+    ///
+    /// ## Authorization split
+    ///
+    /// This helper enforces the *tightest* authorization level in the contract.
+    /// It is used by every entry point that changes the contract's own
+    /// configuration or lifecycle (pause/unpause, compliance-officer
+    /// assignment, bulk jurisdiction removal, WASM upgrade). The reasoning is
+    /// that these operations affect the contract's trust model itself, so they
+    /// must be gated on the one address the deployer designated at setup —
+    /// the issuer — and no delegation is permitted.
+    ///
+    /// Contrast with [`require_compliance_authority`], which additionally
+    /// allows a delegated compliance officer for day-to-day data operations.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if `initialize` has not been called
+    /// yet, or [`Error::NotAuthorized`] if `issuer` does not match the stored
+    /// issuer address.
     fn require_issuer(env: &Env, issuer: &Address) -> Result<(), Error> {
         issuer.require_auth();
         let stored_issuer: Address = env
@@ -277,7 +311,31 @@ impl JurisdictionFlag {
         Ok(())
     }
 
-    /// Checks that `caller` is either the issuer or the compliance officer.
+    /// Looser auth gate — passes if `caller` is the issuer **or** the
+    /// currently assigned compliance officer.
+    ///
+    /// ## Authorization split
+    ///
+    /// This helper enforces a *delegated* authorization level intended for
+    /// routine compliance data operations (currently: [`set_jurisdiction`]).
+    /// The issuer can optionally appoint a compliance officer via
+    /// [`set_compliance_officer`]; once appointed, that officer may call any
+    /// entry point gated by this helper without requiring the issuer key for
+    /// every individual flag operation.
+    ///
+    /// Entry points that mutate the contract's *configuration* (who the
+    /// compliance officer is, whether the contract is paused, etc.) use the
+    /// stricter [`require_issuer`] instead, so a compromised compliance-officer
+    /// key cannot escalate its own privileges.
+    ///
+    /// If no compliance officer has been set, this helper behaves identically
+    /// to [`require_issuer`].
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if `initialize` has not been called,
+    /// or [`Error::NotAuthorized`] if `caller` is neither the issuer nor the
+    /// compliance officer.
     fn require_compliance_authority(env: &Env, caller: &Address) -> Result<(), Error> {
         caller.require_auth();
         let stored_issuer: Address = env
