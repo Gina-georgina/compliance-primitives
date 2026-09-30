@@ -194,6 +194,21 @@ jobs:
 
           echo "All example crates passed tests."
 
+  dead-code-allows:
+    name: dead_code allow lint
+    runs-on: ubuntu-latest
+    # Fail if any #[allow(dead_code)] added in this PR is missing a linked
+    # issue reference (#NNN) in the same line or the line immediately above.
+    # This prevents untracked dead code from silently accumulating.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch base branch for diff
+        run: git fetch origin main
+      - name: Check new #[allow(dead_code)] for linked issue references
+        run: bash scripts/check-dead-code-allows.sh
+
   changelog-version-sync:
     name: changelog version sync check
     runs-on: ubuntu-latest
