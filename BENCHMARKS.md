@@ -74,8 +74,8 @@ if !denylist_client.check(&bob) { return Err(Denied); }
 let allowlist_id = env.register(AllowlistToken, ());
 let allowlist_client = AllowlistTokenClient::new(&env, &allowlist_id);
 allowlist_client.initialize(&admin, &underlying_token_id);
-allowlist_client.add_to_allowlist(&admin, &alice);
-allowlist_client.add_to_allowlist(&admin, &bob);
+allowlist_client.add_to_allowlist(&admin, &alice, &None);
+allowlist_client.add_to_allowlist(&admin, &bob, &None);
 ```
 
 **Operation**:
