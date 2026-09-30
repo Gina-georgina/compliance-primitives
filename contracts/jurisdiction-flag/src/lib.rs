@@ -79,8 +79,20 @@ pub struct JurisdictionFlag;
 
 #[contractimpl]
 impl JurisdictionFlag {
-    /// One-time setup. `issuer` is the only address allowed to set
-    /// jurisdiction codes afterward.
+    /// One-time setup that records `issuer` as the only address allowed to
+    /// set jurisdiction codes afterward.
+    ///
+    /// # Parameters
+    /// - `issuer`: the address that will be authorized to call
+    ///   [`set_jurisdiction`](Self::set_jurisdiction).
+    ///
+    /// # Auth
+    /// Requires `issuer.require_auth()`, so the issuer must sign the
+    /// initialization.
+    ///
+    /// # Errors
+    /// - [`Error::AlreadyInitialized`] if the contract has already been
+    ///   initialized. The existing issuer is left unchanged.
     pub fn initialize(env: Env, issuer: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Issuer) {
             return Err(Error::AlreadyInitialized);
@@ -198,6 +210,20 @@ impl JurisdictionFlag {
     }
 
     /// Returns the jurisdiction code attached to `address`, if any.
+    ///
+    /// # Parameters
+    /// - `address`: the address to look up.
+    ///
+    /// # Returns
+    /// `Some(code)` if a code has been set via
+    /// [`set_jurisdiction`](Self::set_jurisdiction), otherwise `None`.
+    ///
+    /// # Auth
+    /// None. This is a read-only call anyone may make.
+    ///
+    /// # Errors
+    /// Never fails. Works even before the contract is initialized, in which
+    /// case it always returns `None`.
     pub fn get_jurisdiction(env: Env, address: Address) -> Option<String> {
         let key = DataKey::Jurisdiction(address);
         let code: Option<String> = env.storage().persistent().get(&key);

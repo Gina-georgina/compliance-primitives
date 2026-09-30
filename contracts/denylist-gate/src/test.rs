@@ -162,15 +162,63 @@ fn test_add_to_denylist_rejects_non_admin() {
     assert!(client.check(&alice));
 }
 
+/// Soroban's `Address` type has no literal "empty" or "invalid" value the
+/// way a raw string (`""`) would: every `Address` is either a well-formed
+/// account or contract identifier, and the host rejects malformed ones
+/// before they can ever reach contract code. So there is no empty-address
+/// input to test directly.
+///
+/// What this test guards instead is the default-value invariant for a
+/// storage key that has never been written: `check` reads
+/// `DataKey::Denied(address)` and falls back via `unwrap_or(false)`, so an
+/// untouched address must read as "clear" (`true`) rather than panicking
+/// or defaulting to denied.
 #[test]
 fn test_empty_address_key_is_well_defined() {
-    // An address that has never been touched must read as "clear" (true),
-    // not panic or default to denied. This guards the `unwrap_or(false)`
-    // fallback in `check`.
     let env = Env::default();
     let (_admin, _contract_id, client) = setup(&env);
     let never_seen = Address::generate(&env);
     assert!(client.check(&never_seen));
+}
+
+#[test]
+fn test_check_fresh_address_never_referenced_is_clear() {
+    let env = Env::default();
+    let (admin, _contract_id, client) = setup(&env);
+
+    // Touch the denylist with other addresses so storage is not pristine.
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    client.add_to_denylist(&admin, &bob);
+    client.add_to_denylist(&admin, &carol);
+    client.remove_from_denylist(&admin, &carol);
+
+    // A freshly generated address the contract has never seen in any call.
+    let fresh = Address::generate(&env);
+    assert!(client.check(&fresh));
+    assert!(!client.check(&bob));
+}
+
+#[test]
+fn test_add_then_remove_returns_to_default_clear_state() {
+    let env = Env::default();
+    let (admin, contract_id, client) = setup(&env);
+    let alice = Address::generate(&env);
+
+    client.add_to_denylist(&admin, &alice);
+    assert!(!client.check(&alice));
+
+    client.remove_from_denylist(&admin, &alice);
+    assert!(client.check(&alice));
+
+    // The storage entry itself must be gone, not left behind as a stale
+    // `false` or `true` value.
+    env.as_contract(&contract_id, || {
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::Denied(alice.clone())));
+    });
 }
 
 #[test]
