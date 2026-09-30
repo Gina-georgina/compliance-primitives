@@ -121,5 +121,47 @@ pub fn require_not_paused_or<E>(env: &Env, err: E) -> Result<(), E> {
     }
 }
 
+/// Panic with a descriptive message if the contract is **not** currently paused.
+///
+/// This is the inverse of [`require_not_paused`] and is intended for
+/// emergency-only recovery functions that should only be callable *while the
+/// contract is paused* — for example, an admin drain or state-reset that must
+/// be guarded against accidental invocation during normal operation.
+///
+/// # Example
+///
+/// ```ignore
+/// /// Emergency drain — only callable while the contract is paused.
+/// pub fn emergency_recover(env: Env, admin: Address) -> Result<(), Error> {
+///     pausable::require_paused(&env);
+///     // ... recovery logic ...
+/// }
+/// ```
+pub fn require_paused(env: &Env) {
+    if !is_paused(env) {
+        panic!("contract is not paused");
+    }
+}
+
+/// Returns `Err(err)` if the contract is **not** currently paused, `Ok(())`
+/// otherwise.
+///
+/// Use this in entry points that expose the "not paused" condition as a typed
+/// contract error rather than panicking:
+///
+/// ```ignore
+/// pub fn emergency_recover(env: Env) -> Result<(), Error> {
+///     pausable::require_paused_or(&env, Error::NotPaused)?;
+///     // ...
+/// }
+/// ```
+pub fn require_paused_or<E>(env: &Env, err: E) -> Result<(), E> {
+    if !is_paused(env) {
+        Err(err)
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test;
