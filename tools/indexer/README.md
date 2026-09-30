@@ -370,7 +370,41 @@ WHERE e.event_type = 'AllowAdd'
 4. Applies events to both the raw `events` log and the materialised state
    tables (`allowlist`, `denylist`, `jurisdictions`) inside a single SQLite
    transaction per poll cycle.
-5. Persists the new `last_ledger` and sleeps until the next poll. Transient HTTP, network, and retryable JSON-RPC failures are retried with bounded exponential backoff before the next scheduled poll.
+5. Persists the new `last_ledger` and sleeps until the next poll.
+
+### Retry and backoff behaviour
+
+Every RPC call (`getEvents`, `getLatestLedger`) goes through the same
+retry loop in `SorobanRpc` (`src/rpc.ts`). Transient failures are
+automatically retried with **exponential backoff** up to `maxRetries`
+attempts (default 4) before the error is surfaced to the poll loop. The
+poll loop itself logs the error and reschedules the next tick rather than
+crashing the process.
+
+Errors treated as transient (retried):
+- HTTP 408 (Request Timeout), 425 (Too Early), 429 (Too Many Requests)
+- HTTP 5xx (any server-side error, including 503 Service Unavailable)
+- JSON-RPC error code -32000 (server error) and -32603 (internal error)
+- Network-level failures (connection refused, DNS, etc.)
+
+Errors treated as permanent (not retried):
+- HTTP 4xx other than 408/425/429 (e.g. 400 Bad Request, 404 Not Found)
+- JSON-RPC error codes other than -32000 and -32603
+
+Backoff parameters (configurable via `SorobanRpcOptions`):
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `maxRetries` | `4` | Maximum retry attempts before propagating the error |
+| `baseDelayMs` | `250` | Initial retry delay in milliseconds |
+| `maxDelayMs` | `5000` | Maximum retry delay cap in milliseconds |
+
+Delay for attempt _n_: `min(maxDelayMs, baseDelayMs × 2ⁿ)`.
+
+Run the retry tests with:
+```sh
+npx tsx --test src/rpc.test.ts
+```
 
 Run the deterministic integration suite with `npm test`. It starts a local JSON-RPC fixture representing a deployed primitive contract, replays an `AllowAdd` state-changing event, and asserts both the raw event row and materialized allowlist row.
 
