@@ -477,3 +477,34 @@ fn test_multisig_remove_signer_fails_if_only_one() {
     let result = client.try_remove_signer(&admin);
     assert_eq!(result, Err(Ok(Error::InvalidSignerSet)));
 }
+
+#[test]
+fn test_add_and_remove_without_audit_log_is_unchanged() {
+    let env = Env::default();
+    let (admin, _contract_id, client) = setup(&env);
+    let alice = Address::generate(&env);
+
+    assert!(client.check(&alice));
+
+    client.add_to_denylist(&admin, &alice);
+    assert!(!client.check(&alice));
+
+    client.remove_from_denylist(&admin, &alice);
+    assert!(client.check(&alice));
+}
+
+#[test]
+fn test_remove_multiple_from_denylist_removes_all_without_audit_log_noise() {
+    let env = Env::default();
+    let (admin, _contract_id, client) = setup(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    client.add_to_denylist(&admin, &alice);
+    client.add_to_denylist(&admin, &bob);
+
+    client.remove_multiple_from_denylist(&admin, &vec![&env, alice.clone(), bob.clone()]);
+
+    assert!(client.check(&alice));
+    assert!(client.check(&bob));
+}

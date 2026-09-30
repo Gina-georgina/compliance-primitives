@@ -17,8 +17,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env,
-    String,
+    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, BytesN,
+    Env, String,
 };
 
 /// Extend a persistent allowlist entry when its remaining TTL drops below
@@ -37,7 +37,20 @@ enum DataKey {
     Allowed(Address),
     Paused,
     PendingAdmin,
+    PendingUpgrade,
 }
+
+/// Delayed contract-upgrade proposal state used by `propose_upgrade` and
+/// `commit_upgrade`.
+#[contracttype]
+#[derive(Clone)]
+pub struct UpgradeState {
+    pub new_wasm: BytesN<32>,
+    pub activated_at: u64,
+}
+
+/// Schema version tracked by this contract instance for migration/audit tooling.
+pub const SCHEMA_VERSION: u32 = 1;
 
 /// Value stored under `DataKey::Allowed(address)`.
 ///
@@ -111,6 +124,7 @@ pub enum Error {
     ContractPaused = 5,
     NoPendingAdmin = 6,
     PendingAdminMismatch = 7,
+    UpgradeNotReady = 8,
 }
 
 #[contract]
@@ -241,16 +255,18 @@ impl AllowlistToken {
     pub fn propose_upgrade(
         env: Env,
         admin: Address,
-        new_wasm: soroban_sdk::Bytes,
+        new_wasm: BytesN<32>,
         delay_ledgers: u32,
     ) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         let state = UpgradeState {
             new_wasm,
-            activated_at: env.ledger().sequence().saturating_add(delay_ledgers as u64),
+            activated_at: u64::from(env.ledger().sequence())
+                .saturating_add(delay_ledgers as u64),
         };
         env.storage().instance().set(&DataKey::PendingUpgrade, &state);
-        env.events().publish((soroban_sdk::symbol_short!("upg_prop"),), (admin, delay_ledgers));
+        env.events()
+            .publish((soroban_sdk::symbol_short!("upgprop"),), (admin, delay_ledgers));
         Ok(())
     }
 
@@ -265,12 +281,13 @@ impl AllowlistToken {
             .instance()
             .get(&DataKey::PendingUpgrade)
             .ok_or(Error::UpgradeNotReady)?;
-        if env.ledger().sequence() < state.activated_at {
+        if u64::from(env.ledger().sequence()) < state.activated_at {
             return Err(Error::UpgradeNotReady);
         }
         env.deployer().update_current_contract_wasm(state.new_wasm);
         env.storage().instance().remove(&DataKey::PendingUpgrade);
-        env.events().publish((soroban_sdk::symbol_short!("upg_commit"),), (admin,));
+        env.events()
+            .publish((soroban_sdk::symbol_short!("upgcommit"),), (admin,));
         Ok(())
     }
 
