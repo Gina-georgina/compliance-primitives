@@ -8,11 +8,13 @@ members = [
     "contracts/jurisdiction-flag",
     "contracts/circuit-breaker",
     "contracts/policy-engine",
+    "contracts/compliance-aggregator",
     "contracts/multisig-admin",
     "examples/denylist-gate-consumer",
     "examples/denylist-gate-sep41",
     "examples/jurisdiction-denylist-consumer",
     "examples/compliance-integration-flow",
+    "crates/test-trace",
 ]
 
 [workspace.package]

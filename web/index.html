@@ -15,6 +15,9 @@
 <meta name="twitter:description" content="Auditable Soroban contracts for composable on-chain compliance.">
 <meta name="twitter:image" content="architecture.svg">
 <link rel="stylesheet" href="styles.css">
+<!-- Highlight.js — syntax highlighting for Rust/shell code blocks -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github.min.css" id="hljs-light-theme">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github-dark.min.css" id="hljs-dark-theme" disabled>
 </head>
 <body>
 
@@ -30,6 +33,7 @@
         <a href="#quick-start">Quick start</a>
         <a href="interfaces.html">Interfaces</a>
         <a href="playground.html">Playground</a>
+        <a href="status.html">Status</a>
         <a href="https://github.com/stellar-compliance-kit/compliance-primitives">GitHub</a>
       </div>
       <button class="theme-toggle" type="button" aria-pressed="false" aria-label="Use dark mode">Dark mode</button>
@@ -89,7 +93,7 @@
         <span class="tag">admin-managed</span>
         <span class="tag">wraps SEP-41</span>
         <div class="fns">
-          <code>add_to_allowlist(admin, address)</code>
+          <code>add_to_allowlist(admin, address, expiration_ledger)</code>
           <code>is_allowed(address) -&gt; bool</code>
           <code>transfer(from, to, amount) -&gt; bool</code>
         </div>
@@ -164,25 +168,25 @@
 <section id="quick-start">
   <div class="wrap">
     <h2>Quick start</h2>
-    <pre class="code" tabindex="0" role="region" aria-label="Quick start shell commands"><span class="comment"># Clone</span>
+    <pre class="code" tabindex="0" role="region" aria-label="Quick start shell commands"><code class="language-bash"># Clone
 git clone https://github.com/stellar-compliance-kit/compliance-primitives.git
 cd compliance-primitives
 
-<span class="comment"># Run the full test suite (all three contracts + example)</span>
+# Run the full test suite (all three contracts + example)
 cargo test --workspace
 
-<span class="comment"># Lint</span>
+# Lint
 cargo clippy --workspace --all-targets -- -D warnings
 
-<span class="comment"># Build a contract to wasm (requires the wasm32v1-none target:
-# rustup target add wasm32v1-none)</span>
+# Build a contract to wasm (requires the wasm32v1-none target:
+# rustup target add wasm32v1-none)
 stellar contract build
 
-<span class="comment"># Deploy a built contract to testnet, e.g. denylist-gate</span>
+# Deploy a built contract to testnet, e.g. denylist-gate
 stellar contract deploy \
   --wasm target/wasm32v1-none/release/denylist_gate.wasm \
   --source &lt;your-testnet-identity&gt; \
-  --network testnet</pre>
+  --network testnet</code></pre>
   </div>
 </section>
 </main>
@@ -202,6 +206,9 @@ stellar contract deploy \
   </div>
 </footer>
 <script src="app.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/languages/rust.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/languages/bash.min.js"></script>
 <script>
   (() => {
     const root = document.documentElement;
@@ -210,11 +217,18 @@ stellar contract deploy \
     const nav = document.querySelector('#site-nav');
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'light' || savedTheme === 'dark') root.dataset.theme = savedTheme;
+    const lightTheme = document.getElementById('hljs-light-theme');
+    const darkTheme  = document.getElementById('hljs-dark-theme');
+    const applyHljsTheme = (dark) => {
+      if (lightTheme) lightTheme.disabled = dark;
+      if (darkTheme)  darkTheme.disabled  = !dark;
+    };
     const updateTheme = () => {
       const dark = root.dataset.theme === 'dark' || (!root.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
       themeToggle.textContent = dark ? 'Light mode' : 'Dark mode';
       themeToggle.setAttribute('aria-label', dark ? 'Use light mode' : 'Use dark mode');
       themeToggle.setAttribute('aria-pressed', String(dark));
+      applyHljsTheme(dark);
     };
     themeToggle.addEventListener('click', () => {
       const dark = root.dataset.theme === 'dark' || (!root.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -227,6 +241,7 @@ stellar contract deploy \
       menuToggle.setAttribute('aria-expanded', String(open));
     });
     updateTheme();
+    if (typeof hljs !== 'undefined') hljs.highlightAll();
   })();
 </script>
 </body>

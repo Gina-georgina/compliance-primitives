@@ -52,6 +52,17 @@ pub struct UpgradeState {
 /// Schema version tracked by this contract instance for migration/audit tooling.
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// Value stored under `DataKey::Allowed(address)`.
+///
+/// `expiration_ledger` is the last ledger sequence (inclusive) at which the
+/// address is still treated as allowlisted. `None` means the entry never
+/// expires and stays valid until an explicit `remove_from_allowlist`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowlistEntry {
+    pub expiration_ledger: Option<u32>,
+}
+
 #[contractevent]
 pub struct AllowAdd {
     #[topic]
@@ -148,10 +159,32 @@ impl AllowlistToken {
     }
 
     /// Add `address` to the allowlist. Admin-only.
-    pub fn add_to_allowlist(env: Env, admin: Address, address: Address) -> Result<(), Error> {
+    ///
+    /// `expiration_ledger` optionally bounds how long the entry stays valid:
+    ///
+    /// - `None` — the address stays allowlisted until `remove_from_allowlist`.
+    /// - `Some(n)` — the address is allowlisted while the current ledger
+    ///   sequence is `<= n` and automatically treated as not allowlisted from
+    ///   ledger `n + 1` onward, with no explicit removal required.
+    ///
+    /// Re-adding an address overwrites its previous expiry. Returns
+    /// `Error::InvalidInput` if `expiration_ledger` is already in the past.
+    pub fn add_to_allowlist(
+        env: Env,
+        admin: Address,
+        address: Address,
+        expiration_ledger: Option<u32>,
+    ) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
+        if let Some(exp) = expiration_ledger {
+            if exp < env.ledger().sequence() {
+                return Err(Error::InvalidInput);
+            }
+        }
         let key = DataKey::Allowed(address.clone());
-        env.storage().persistent().set(&key, &true);
+        env.storage()
+            .persistent()
+            .set(&key, &AllowlistEntry { expiration_ledger });
         env.storage().persistent().extend_ttl(
             &key,
             ALLOWED_TTL_THRESHOLD,
@@ -272,12 +305,31 @@ impl AllowlistToken {
 
     /// Returns true if `address` is currently allowlisted.
     ///
+    /// An entry whose `expiration_ledger` has passed (current ledger sequence
+    /// is greater than it) is treated as not allowlisted, even though it has
+    /// not been explicitly removed.
+    ///
     /// Not affected by pause state — reads always succeed.
     pub fn is_allowed(env: Env, address: Address) -> bool {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Allowed(address))
-            .unwrap_or(false)
+        let entry: Option<AllowlistEntry> =
+            env.storage().persistent().get(&DataKey::Allowed(address));
+        match entry {
+            None => false,
+            Some(AllowlistEntry {
+                expiration_ledger: None,
+            }) => true,
+            Some(AllowlistEntry {
+                expiration_ledger: Some(exp),
+            }) => env.ledger().sequence() <= exp,
+        }
+    }
+
+    /// Returns the raw allowlist entry stored for `address`, if any.
+    ///
+    /// An already-expired entry is still returned here (it is only ignored,
+    /// not deleted) — use `is_allowed` for the effective status.
+    pub fn get_allowlist_entry(env: Env, address: Address) -> Option<AllowlistEntry> {
+        env.storage().persistent().get(&DataKey::Allowed(address))
     }
 
     /// Pause all mutating operations. Admin-only.
@@ -362,3 +414,6 @@ impl AllowlistToken {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod fuzz;
