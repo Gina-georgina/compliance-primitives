@@ -382,7 +382,10 @@ footer .foot-row {
   display: none !important;
 }
 
-/* Explicit user preference overrides the OS default. */
+/* Explicit user preference overrides the OS default.
+ * Dark mode support: prefers-color-scheme is handled by the @media block
+ * above. These overrides allow the manual toggle button to force a theme
+ * independently of the OS setting (stored in localStorage under 'theme'). */
 :root[data-theme="light"] {
   --bg: #ffffff;
   --bg-raised: #f6f7f9;
@@ -390,6 +393,7 @@ footer .foot-row {
   --text: #1a1d23;
   --text-dim: #5b616e;
   --accent: #0060df;
+  --accent-solid: #0060df;
   --accent-bg: #eaf1fd;
   --code-bg: #f6f7f9;
   --code-text: #24292e;
@@ -402,6 +406,7 @@ footer .foot-row {
   --text: #e6e8eb;
   --text-dim: #9aa2ad;
   --accent: #6ea8fe;
+  --accent-solid: #1f6feb;
   --accent-bg: #16233b;
   --code-bg: #151b23;
   --code-text: #d7dbe0;
