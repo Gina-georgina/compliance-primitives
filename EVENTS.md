@@ -231,6 +231,96 @@ data   : {}
 
 ---
 
+### `compliance-aggregator`
+
+#### `AdminSet`
+
+Emitted when the aggregator's admin is set, either during `initialize` or
+when `set_admin` replaces it.
+
+```
+topics : ["admin_set", <admin: Address>]
+data   : {}
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `admin` | `Address` | topic | Admin address after the change |
+
+#### `DenylistGateSet`
+
+Emitted when the `denylist-gate` address is registered, either during
+`initialize` (if provided) or when `set_denylist_gate` replaces it.
+
+```
+topics : ["denylist_gate_set", <gate: Address>]
+data   : {}
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `gate` | `Address` | topic | `denylist-gate` contract address now registered |
+
+#### `JurisdictionFlagSet`
+
+Emitted when the `jurisdiction-flag` address is registered, either during
+`initialize` (if provided) or when `set_jurisdiction_flag` replaces it.
+
+```
+topics : ["jurisdiction_flag_set", <flag: Address>]
+data   : {}
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `flag` | `Address` | topic | `jurisdiction-flag` contract address now registered |
+
+#### `CircuitBreakerSet`
+
+Emitted when the `circuit-breaker` address is registered, either during
+`initialize` (if provided) or when `set_circuit_breaker` replaces it.
+
+```
+topics : ["circuit_breaker_set", <breaker: Address>]
+data   : {}
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `breaker` | `Address` | topic | `circuit-breaker` contract address now registered |
+
+#### `UpgradePerformed`
+
+Emitted when the admin swaps the contract's WASM via `upgrade`. Emitted
+before the WASM swap so the upgrade is visible to indexers.
+
+```
+topics : ["upgrade_performed", <admin: Address>]
+data   : { "new_wasm_hash": <BytesN<32>> }
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `admin` | `Address` | topic | Admin that authorized the upgrade |
+| `new_wasm_hash` | `BytesN<32>` | data | Hash of the WASM the contract is upgraded to |
+
+#### `Paused` / `Unpaused`
+
+Emitted by `pause` and `unpause` respectively. These are raw events published
+via `env.events().publish((), Symbol)` rather than `#[contractevent]` structs,
+so they carry an empty topic vector and the event name as the data payload.
+
+```
+topics : []
+data   : "Paused" | "Unpaused"   (Symbol)
+```
+
+> **Note — no topics**: because these events have no address topic, they
+> cannot be filtered by address. Index them by contract address and by the
+> `data` symbol. This shape differs from every other event in this file.
+
+---
+
 ## Cross-contract event ordering guarantees
 
 There are none. Each contract emits events only for its own state changes.
