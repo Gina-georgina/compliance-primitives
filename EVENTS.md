@@ -205,7 +205,9 @@ data   : {}
 
 #### `Frozen`
 
-Emitted when the admin freezes the circuit breaker.
+Emitted when the admin freezes the circuit breaker. Also emitted when the
+contract is already frozen — the state write is a no-op but the event is still
+emitted for auditability.
 
 ```
 topics : ["frozen", <admin: Address>]
@@ -218,7 +220,9 @@ data   : {}
 
 #### `Unfrozen`
 
-Emitted when the admin unfreezes the circuit breaker.
+Emitted when the admin unfreezes the circuit breaker. Also emitted when the
+contract is not frozen — the state write is a no-op but the event is still
+emitted for auditability.
 
 ```
 topics : ["unfrozen", <admin: Address>]
@@ -228,6 +232,11 @@ data   : {}
 | Field | Type | Placement | Description |
 |---|---|---|---|
 | `admin` | `Address` | topic | Admin address that unfroze the contract |
+
+> **Note — no admin-transfer event**: unlike `allowlist-token` and
+> `denylist-gate`, `circuit-breaker`'s `propose_admin` / `accept_admin` flow
+> does not currently emit an `AdminTransferred` event. Indexers must read
+> contract state to track admin changes.
 
 ---
 
