@@ -1,8 +1,27 @@
+//! ## Storage and TTL policy
+//!
+//! All state (admin, pending admin and the frozen flag) lives in **instance**
+//! storage, which shares a single TTL with the contract instance itself. Every
+//! write path (`initialize`, `freeze`, `unfreeze`, `propose_admin`,
+//! `accept_admin`) finishes by extending that TTL: whenever the remaining TTL
+//! has dropped below [`INSTANCE_TTL_THRESHOLD`] (~7 days) it is bumped back up
+//! to [`INSTANCE_TTL_EXTEND_TO`] (~90 days). This keeps the breaker from being
+//! archived by Soroban state expiration — an archived breaker would make
+//! `is_frozen` read as its default and leave the freeze unenforceable until a
+//! manual restore.
 #![no_std]
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, Address, Env, String,
 };
+
+/// Extend the contract's instance storage when its remaining TTL drops below
+/// this many ledgers (~7 days at ~5s/ledger).
+pub const INSTANCE_TTL_THRESHOLD: u32 = 120_960;
+
+/// Target remaining TTL, in ledgers, after an extension (~90 days at
+/// ~5s/ledger).
+pub const INSTANCE_TTL_EXTEND_TO: u32 = 1_555_200;
 
 #[contracttype]
 #[derive(Clone)]
@@ -56,12 +75,14 @@ impl CircuitBreaker {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Frozen, &false);
+        Self::extend_instance_ttl(&env);
         Ok(())
     }
 
     pub fn freeze(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Frozen, &true);
+        Self::extend_instance_ttl(&env);
         Frozen {
             admin: admin.clone(),
         }
@@ -72,6 +93,7 @@ impl CircuitBreaker {
     pub fn unfreeze(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Frozen, &false);
+        Self::extend_instance_ttl(&env);
         Unfrozen {
             admin: admin.clone(),
         }
@@ -89,6 +111,7 @@ impl CircuitBreaker {
     pub fn propose_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        Self::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -106,6 +129,7 @@ impl CircuitBreaker {
         }
         env.storage().instance().set(&DataKey::Admin, &new_admin);
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        Self::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -121,6 +145,15 @@ impl CircuitBreaker {
             version: String::from_str(&env, env!("CARGO_PKG_VERSION")),
             admin,
         })
+    }
+
+    /// Refresh the TTL of the contract instance (and therefore of every
+    /// instance-storage entry). See the "Storage and TTL policy" section of
+    /// the module docs.
+    fn extend_instance_ttl(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
     }
 
     fn require_admin(env: &Env, admin: &Address) -> Result<(), Error> {
