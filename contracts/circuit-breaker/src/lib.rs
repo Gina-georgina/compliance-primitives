@@ -1,7 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, Address, Env, String,
+    contract, contractclient, contracterror, contractevent, contractimpl, contracttype, Address,
+    Env, String, Symbol,
 };
 
 #[contracttype]
@@ -10,6 +11,7 @@ enum DataKey {
     Admin,
     Frozen,
     PendingAdmin,
+    AuditLog,
 }
 
 /// Version + admin metadata about this contract instance, for tooling that
@@ -31,6 +33,11 @@ pub struct Frozen {
 pub struct Unfrozen {
     #[topic]
     pub admin: Address,
+}
+
+#[contractclient(name = "AuditLogClient")]
+pub trait AuditLogInterface {
+    fn record(env: Env, source: Address, kind: Symbol, subject: Address, detail: String);
 }
 
 #[contracterror]
@@ -59,6 +66,13 @@ impl CircuitBreaker {
         Ok(())
     }
 
+    /// Configure the optional append-only audit log. Admin-only.
+    pub fn set_audit_log(env: Env, admin: Address, audit_log: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::AuditLog, &audit_log);
+        Ok(())
+    }
+
     pub fn freeze(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Frozen, &true);
@@ -66,6 +80,7 @@ impl CircuitBreaker {
             admin: admin.clone(),
         }
         .publish(&env);
+        Self::record_audit(&env, Symbol::new(&env, "freeze"), &admin, "circuit breaker frozen");
         Ok(())
     }
 
@@ -76,6 +91,7 @@ impl CircuitBreaker {
             admin: admin.clone(),
         }
         .publish(&env);
+        Self::record_audit(&env, Symbol::new(&env, "unfreeze"), &admin, "circuit breaker unfrozen");
         Ok(())
     }
 
@@ -134,6 +150,21 @@ impl CircuitBreaker {
             return Err(Error::NotAuthorized);
         }
         Ok(())
+    }
+
+    fn record_audit(env: &Env, kind: Symbol, subject: &Address, detail: &str) {
+        if let Some(audit_log) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::AuditLog)
+        {
+            AuditLogClient::new(env, &audit_log).record(
+                &env.current_contract_address(),
+                &kind,
+                subject,
+                &String::from_str(env, detail),
+            );
+        }
     }
 }
 
