@@ -39,11 +39,28 @@
 //! before: the audit log path is guarded by an `if let Some(...)` check on
 //! the stored audit-log address, so the cost and code path are zero when
 //! the feature is not configured.
+//!
+//! ## Upgradeability
+//!
+//! `upgrade(admin, new_wasm_hash)` lets the configured admin move the
+//! contract's code to a new WASM hash via
+//! `env.deployer().update_current_contract_wasm`, following the same
+//! admin-gated pattern used by `compliance-aggregator` and `jurisdiction-flag`.
+//! Only the stored admin may call it; any other caller is rejected with
+//! `Error::NotAuthorized`, and calling it before `initialize` returns
+//! `Error::NotInitialized`. An `UpgradePerformed` event is emitted so the
+//! upgrade is visible to indexers.
+//!
+//! The WASM swap does not touch storage: the admin key and the entry counter
+//! live in instance storage, and every `Entry(index)` lives in persistent
+//! storage under the same `DataKey` variants, so the log is intact and
+//! callable immediately after the upgrade. See `UPGRADE.md` in this crate for
+//! the full procedure and the storage rules a new version must follow.
 #![no_std]
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype, Address,
-    Env, String, Symbol, Vec,
+    BytesN, Env, String, Symbol, Vec,
 };
 
 /// Maximum number of entries `list_entries` will return in a single call.
@@ -100,6 +117,15 @@ pub struct ComplianceEvent {
     pub detail: String,
 }
 
+/// Emitted whenever the contract is upgraded to a new WASM implementation,
+/// for on-chain auditability of the upgrade path.
+#[contractevent]
+pub struct UpgradePerformed {
+    #[topic]
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -113,6 +139,8 @@ pub enum Error {
     NotAuthorized = 3,
     /// `limit` passed to `list_entries` exceeds [`MAX_PAGE_SIZE`].
     PageTooLarge = 4,
+    /// `record` was called while the contract is paused.
+    ContractPaused = 5,
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +208,23 @@ impl AuditLog {
     /// Check if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         compliance_pausable::is_paused(&env)
+    }
+
+    /// Upgrade the contract WASM. Admin-only.
+    ///
+    /// Swaps the code behind this contract ID to `new_wasm_hash` (which must
+    /// already be uploaded to the network). The admin key, the entry counter
+    /// and every recorded entry are preserved across the upgrade. See the
+    /// module-level "Upgradeability" section for the full procedure.
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        UpgradePerformed {
+            admin,
+            new_wasm_hash: new_wasm_hash.clone(),
+        }
+        .publish(&env);
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
     }
 
     /// Append a compliance event to the log.
@@ -288,6 +333,20 @@ impl AuditLog {
         }
 
         Ok(entries)
+    }
+
+    /// Require `admin` to authorize the call and to match the stored admin.
+    fn require_admin(env: &Env, admin: &Address) -> Result<(), Error> {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if stored_admin != *admin {
+            return Err(Error::NotAuthorized);
+        }
+        Ok(())
     }
 }
 
