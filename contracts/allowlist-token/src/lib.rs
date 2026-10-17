@@ -243,6 +243,9 @@ impl AllowlistToken {
         Self::require_configured_admin(&env, &admin)?;
 
         let now = env.ledger().timestamp();
+        // Strict comparison: `expiry == now` is already expired, so a zero
+        // expiry or one at the current ledger timestamp is rejected. Only
+        // `expiry > now` is accepted.
         if expiry <= now {
             return Err(Error::ExpiredSignature);
         }
