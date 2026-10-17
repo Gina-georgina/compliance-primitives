@@ -391,6 +391,26 @@ impl ComplianceAggregator {
         Ok(())
     }
 
+    /// Unregister the `denylist-gate` check. Admin-only. Afterwards the
+    /// denylist check is skipped, as if it had never been registered.
+    pub fn clear_denylist_gate(env: Env, admin: Address) -> Result<(), Error> {
+        compliance_pausable::require_not_paused_or(&env, Error::ContractPaused)?;
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().remove(&DataKey::DenylistGate);
+        extend_instance_ttl(&env);
+        Ok(())
+    }
+
+    /// Unregister the `jurisdiction-flag` check. Admin-only. Afterwards the
+    /// jurisdiction check is skipped, as if it had never been registered.
+    pub fn clear_jurisdiction_flag(env: Env, admin: Address) -> Result<(), Error> {
+        compliance_pausable::require_not_paused_or(&env, Error::ContractPaused)?;
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().remove(&DataKey::JurisdictionFlag);
+        extend_instance_ttl(&env);
+        Ok(())
+    }
+
     /// Register or replace the `circuit-breaker` contract address. Admin-only.
     /// Pass this to enable emergency-freeze short-circuiting of all checks.
     pub fn set_circuit_breaker(env: Env, admin: Address, breaker: Address) -> Result<(), Error> {
