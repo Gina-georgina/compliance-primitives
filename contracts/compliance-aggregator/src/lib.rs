@@ -726,3 +726,6 @@ impl ComplianceAggregator {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod fuzz;
