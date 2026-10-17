@@ -11,6 +11,7 @@ members = [
     "contracts/policy-engine",
     "contracts/compliance-aggregator",
     "contracts/multisig-admin",
+    "examples/allowlist-token-usage",
     "examples/denylist-gate-consumer",
     "examples/denylist-gate-sep41",
     "examples/jurisdiction-denylist-consumer",
