@@ -83,6 +83,15 @@ impl CircuitBreaker {
         env.storage().instance().get(&DataKey::Frozen).unwrap_or(false)
     }
 
+    /// Returns the current admin address, or `Err(Error::NotInitialized)` if
+    /// the contract has not yet been initialized.
+    pub fn get_admin(env: Env) -> Result<Address, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)
+    }
+
     /// Propose a new admin. The current admin remains fully in control
     /// until the proposed admin calls `accept_admin`; this avoids a
     /// single-typo lockout from a direct admin overwrite.
