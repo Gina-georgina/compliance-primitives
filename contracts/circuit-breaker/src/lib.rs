@@ -2,6 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, Address, Env, String,
+    Symbol,
 };
 
 #[contracttype]
@@ -25,6 +26,7 @@ pub struct Metadata {
 pub struct Frozen {
     #[topic]
     pub admin: Address,
+    pub reason: Option<Symbol>,
 }
 
 #[contractevent]
@@ -59,11 +61,14 @@ impl CircuitBreaker {
         Ok(())
     }
 
-    pub fn freeze(env: Env, admin: Address) -> Result<(), Error> {
+    /// Freeze the breaker. `reason` is optional and is emitted in the
+    /// `Frozen` event so observers can tell e.g. maintenance from an incident.
+    pub fn freeze(env: Env, admin: Address, reason: Option<Symbol>) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Frozen, &true);
         Frozen {
             admin: admin.clone(),
+            reason,
         }
         .publish(&env);
         Ok(())
