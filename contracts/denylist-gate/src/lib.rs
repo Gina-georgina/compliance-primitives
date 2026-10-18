@@ -61,6 +61,8 @@ const MAX_BATCH_SIZE: u32 = 45;
 enum DataKey {
     /// The admin address, set once in `initialize`. Instance storage.
     Admin,
+    /// Admin proposed by `propose_admin`, awaiting `accept_admin`. Instance storage.
+    PendingAdmin,
     Paused,
     ComplianceOfficer,
     AuditLog,
@@ -171,6 +173,8 @@ pub enum Error {
     UpgradeNotReady = 10,
     SignerAlreadyExists = 11,
     MultisigNotEnabled = 12,
+    NoPendingAdmin = 13,
+    PendingAdminMismatch = 14,
 }
 
 // ---------------------------------------------------------------------------
@@ -224,12 +228,55 @@ impl DenylistGate {
         Ok(())
     }
 
-    /// Reassign the admin role to `new_admin`. Requires auth from
+    /// Propose a new admin. The current admin remains active until the
+    /// proposed admin calls `accept_admin`. Replaces any earlier proposal.
+    pub fn propose_admin(env: Env, current_admin: Address, new_admin: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &current_admin)?;
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        Ok(())
+    }
+
+    /// Accept a pending admin transfer. Must be called by the proposed admin.
+    pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        new_admin.require_auth();
+        let pending_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(Error::NoPendingAdmin)?;
+        if pending_admin != new_admin {
+            return Err(Error::PendingAdminMismatch);
+        }
+        let old_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        AdminTransferred { old_admin, new_admin }.publish(&env);
+        Ok(())
+    }
+
+    /// Withdraw a pending admin proposal. Admin-only.
+    pub fn cancel_admin_proposal(env: Env, current_admin: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &current_admin)?;
+        if !env.storage().instance().has(&DataKey::PendingAdmin) {
+            return Err(Error::NoPendingAdmin);
+        }
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        Ok(())
+    }
+
+    /// Reassign the admin role to `new_admin` immediately. Requires auth from
     /// `current_admin`, which must be the stored admin.
     ///
-    /// Takes effect immediately: the old admin loses all privileges as soon
-    /// as this call succeeds. Deliberately *not* blocked by `pause`, so a
-    /// compromised or rotated admin key can always be replaced.
+    /// Single-step, for emergency rotation: the old admin loses all privileges
+    /// as soon as this call succeeds, and `new_admin`'s key is not checked
+    /// first. Use `propose_admin` / `accept_admin` for routine handovers.
+    /// Clears any pending proposal from `propose_admin`. Deliberately *not*
+    /// blocked by `pause`, so a compromised or rotated admin key can always be
+    /// replaced.
     ///
     /// Emits `AdminTransferred { old_admin, new_admin }`.
     pub fn transfer_admin(
@@ -239,6 +286,7 @@ impl DenylistGate {
     ) -> Result<(), Error> {
         Self::require_admin(&env, &current_admin)?;
         env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
         AdminTransferred {
             old_admin: current_admin,
             new_admin,
