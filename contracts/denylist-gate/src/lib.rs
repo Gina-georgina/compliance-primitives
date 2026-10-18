@@ -224,6 +224,18 @@ impl DenylistGate {
         Ok(())
     }
 
+    /// Disconnect the audit log so denylist mutations stop calling it. Admin-only.
+    pub fn clear_audit_log(env: Env, admin: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().remove(&DataKey::AuditLog);
+        Ok(())
+    }
+
+    /// Return the currently configured audit-log address, if any.
+    pub fn get_audit_log(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::AuditLog)
+    }
+
     /// Reassign the admin role to `new_admin`. Requires auth from
     /// `current_admin`, which must be the stored admin.
     ///
