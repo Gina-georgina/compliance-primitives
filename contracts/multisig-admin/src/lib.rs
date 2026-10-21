@@ -275,6 +275,10 @@ pub enum Error {
     ProposalNotFound = 9,
     /// The proposal has passed its expiry ledger sequence.
     ExpiredProposal = 10,
+    /// The caller is not in the current signer set.
+    NotASigner = 11,
+    /// The signer has already approved this proposal.
+    AlreadyApproved = 12,
 }
 
 // ---------------------------------------------------------------------------
@@ -555,13 +559,13 @@ impl MultisigAdmin {
             }
         }
         if !is_valid_signer {
-            return Err(Error::ThresholdNotMet);
+            return Err(Error::NotASigner);
         }
 
         // Check if already approved.
         for i in 0..proposal.approvals.len() {
             if proposal.approvals.get(i).unwrap() == approver {
-                return Ok(false);
+                return Err(Error::AlreadyApproved);
             }
         }
 
