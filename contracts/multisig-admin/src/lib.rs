@@ -601,7 +601,27 @@ impl MultisigAdmin {
             .get(&DataKey::Threshold)
             .ok_or(Error::NotInitialized)?;
 
-        if (proposal.approvals.len() as u32) < threshold {
+        // Count only approvals from addresses still in the current signer set.
+        // If a signer was removed after approving (e.g. compromised key), their
+        // earlier approval must not count toward the threshold.
+        let signers: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Signers)
+            .ok_or(Error::NotInitialized)?;
+
+        let mut valid_approval_count: u32 = 0;
+        for i in 0..proposal.approvals.len() {
+            let approver = proposal.approvals.get(i).unwrap();
+            for j in 0..signers.len() {
+                if signers.get(j).unwrap() == approver {
+                    valid_approval_count += 1;
+                    break;
+                }
+            }
+        }
+
+        if valid_approval_count < threshold {
             return Err(Error::ThresholdNotMet);
         }
 
