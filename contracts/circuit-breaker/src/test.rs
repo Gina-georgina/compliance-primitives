@@ -79,13 +79,17 @@ fn test_non_admin_cannot_freeze_or_unfreeze() {
 }
 
 #[test]
-fn test_is_frozen_before_initialize_returns_false() {
+fn test_is_frozen_before_initialize_returns_not_initialized_error() {
     let env = Env::default();
     let contract_id = env.register(CircuitBreaker, ());
     let client = CircuitBreakerClient::new(&env, &contract_id);
-    // Never called `initialize` on this instance. `is_frozen` should
-    // return a sensible default (`false`) rather than panicking.
-    assert!(!client.is_frozen());
+    // Never called `initialize` on this instance.  `is_frozen` must now
+    // return `Err(NotInitialized)` instead of silently returning `false`.
+    // Callers (compliance-aggregator, policy-engine) must treat this as a
+    // hard failure — failing open on an uninitialized breaker is a
+    // security vulnerability (issue #607).
+    let result = client.try_is_frozen();
+    assert_eq!(result, Err(Ok(Error::NotInitialized)));
 }
 
 #[test]
@@ -97,8 +101,13 @@ fn test_double_freeze_is_idempotent() {
     // stays frozen and the call itself succeeds rather than erroring.
     client.freeze(&admin);
     assert!(client.is_frozen());
+    // Exactly one Frozen event should have been emitted so far.
+    assert_eq!(env.events().all().len(), 1);
+
     client.freeze(&admin);
     assert!(client.is_frozen());
+    // Second freeze must NOT emit another event.
+    assert_eq!(env.events().all().len(), 1);
 }
 
 #[test]
@@ -110,8 +119,27 @@ fn test_double_unfreeze_is_idempotent() {
     // stays unfrozen and the call itself succeeds rather than erroring.
     client.unfreeze(&admin);
     assert!(!client.is_frozen());
+    // Already unfrozen at init; first unfreeze call also should not emit.
+    assert_eq!(env.events().all().len(), 0);
+
     client.unfreeze(&admin);
     assert!(!client.is_frozen());
+    // Still no events: both calls were no-ops.
+    assert_eq!(env.events().all().len(), 0);
+}
+
+#[test]
+fn test_freeze_then_unfreeze_emits_exactly_one_event_each() {
+    let env = Env::default();
+    let (admin, client) = setup(&env);
+
+    client.freeze(&admin);
+    // One Frozen event.
+    assert_eq!(env.events().all().len(), 1);
+
+    client.unfreeze(&admin);
+    // One Frozen + one Unfrozen = two events total.
+    assert_eq!(env.events().all().len(), 2);
 }
 
 #[test]
