@@ -10,7 +10,7 @@
 //! orders, etc.), decoupled from any single token contract's own storage.
 //!
 //! **Callers**: an `admin` address manages the denylist through
-//! `add_to_denylist`/`remove_from_denylist`. Other contracts — typically a
+//! `add_to_denylist`/`remove_from_denylist`/`remove_multiple_from_denylist`. Other contracts — typically a
 //! token's `transfer` function — call the read-only `check(address)` via a
 //! cross-contract call before moving funds, so the denylist can be updated
 //! without redeploying or touching the token contract itself.
@@ -23,6 +23,13 @@
 //!
 //! The contract starts in single-admin mode: `admin` (set in `initialize`)
 //! authorizes every denylist mutation via `require_auth()`.
+//!
+//! Denylist entry mutations (`add_to_denylist`, `remove_from_denylist`, and
+//! `remove_multiple_from_denylist`) also accept the compliance officer, if one
+//! is set. Single and batch removal share the same authority check, so an
+//! officer never needs admin rights to do a batch what it can do one by one.
+//! Officer assignment, audit-log configuration, pause, and signer governance
+//! remain admin-only.
 //!
 //! `initialize_multisig` (admin-only, callable once) additionally installs an
 //! M-of-N signer set. From then on the signer set is governed as follows:
@@ -457,14 +464,14 @@ impl DenylistGate {
         Ok(())
     }
 
-    /// Remove every address in `addresses` from the denylist. Admin-only.
+    /// Remove every address in `addresses` from the denylist. Admin or compliance-officer.
     pub fn remove_multiple_from_denylist(
         env: Env,
         admin: Address,
         addresses: Vec<Address>,
     ) -> Result<(), Error> {
         Self::reject_if_paused(&env)?;
-        Self::require_admin(&env, &admin)?;
+        Self::require_compliance_authority(&env, &admin)?;
         if addresses.len() > MAX_BATCH_SIZE {
             return Err(Error::BatchTooLarge);
         }
