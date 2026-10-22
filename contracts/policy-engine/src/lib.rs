@@ -508,6 +508,9 @@ impl PolicyEngine {
             .instance()
             .get(&DataKey::Checks)
             .ok_or(Error::NotInitialized)?;
+        if index >= checks.len() {
+            return Err(Error::IndexOutOfBounds);
+        }
         checks.remove(index);
         env.storage().instance().set(&DataKey::Checks, &checks);
         Self::extend_instance_ttl(&env);
