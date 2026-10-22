@@ -838,7 +838,7 @@ fn test_circuit_breaker_freeze_short_circuits_check_address() {
     assert!(checks.get(0).unwrap().passed);
 
     // Freeze mid-flow.
-    breaker_client.freeze(&breaker_admin);
+    breaker_client.freeze(&breaker_admin, &None);
 
     // Now the same previously-passing check is denied without even
     // consulting the denylist-gate.
