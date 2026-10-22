@@ -79,13 +79,17 @@ fn test_non_admin_cannot_freeze_or_unfreeze() {
 }
 
 #[test]
-fn test_is_frozen_before_initialize_returns_false() {
+fn test_is_frozen_before_initialize_returns_not_initialized_error() {
     let env = Env::default();
     let contract_id = env.register(CircuitBreaker, ());
     let client = CircuitBreakerClient::new(&env, &contract_id);
-    // Never called `initialize` on this instance. `is_frozen` should
-    // return a sensible default (`false`) rather than panicking.
-    assert!(!client.is_frozen());
+    // Never called `initialize` on this instance.  `is_frozen` must now
+    // return `Err(NotInitialized)` instead of silently returning `false`.
+    // Callers (compliance-aggregator, policy-engine) must treat this as a
+    // hard failure — failing open on an uninitialized breaker is a
+    // security vulnerability (issue #607).
+    let result = client.try_is_frozen();
+    assert_eq!(result, Err(Ok(Error::NotInitialized)));
 }
 
 #[test]
@@ -97,8 +101,13 @@ fn test_double_freeze_is_idempotent() {
     // stays frozen and the call itself succeeds rather than erroring.
     client.freeze(&admin);
     assert!(client.is_frozen());
+    // Exactly one Frozen event should have been emitted so far.
+    assert_eq!(env.events().all().len(), 1);
+
     client.freeze(&admin);
     assert!(client.is_frozen());
+    // Second freeze must NOT emit another event.
+    assert_eq!(env.events().all().len(), 1);
 }
 
 #[test]
@@ -110,8 +119,27 @@ fn test_double_unfreeze_is_idempotent() {
     // stays unfrozen and the call itself succeeds rather than erroring.
     client.unfreeze(&admin);
     assert!(!client.is_frozen());
+    // Already unfrozen at init; first unfreeze call also should not emit.
+    assert_eq!(env.events().all().len(), 0);
+
     client.unfreeze(&admin);
     assert!(!client.is_frozen());
+    // Still no events: both calls were no-ops.
+    assert_eq!(env.events().all().len(), 0);
+}
+
+#[test]
+fn test_freeze_then_unfreeze_emits_exactly_one_event_each() {
+    let env = Env::default();
+    let (admin, client) = setup(&env);
+
+    client.freeze(&admin);
+    // One Frozen event.
+    assert_eq!(env.events().all().len(), 1);
+
+    client.unfreeze(&admin);
+    // One Frozen + one Unfrozen = two events total.
+    assert_eq!(env.events().all().len(), 2);
 }
 
 #[test]
@@ -161,4 +189,85 @@ fn test_metadata_after_initialization() {
         metadata.version,
         soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
     );
+}
+
+// ---------------------------------------------------------------------------
+// Resource-fee benchmark (budget regression) — `is_frozen`
+//
+// `is_frozen` is the circuit-breaker's hottest entrypoint: consumers such as
+// `compliance-aggregator` read it on every check. The measured CPU/memory
+// cost is compared against the `[circuit-breaker.is_frozen]` entry in
+// `budget-baselines.toml`; the test (and therefore the `budget-regression` CI
+// job, which runs `cargo test --workspace budget_regression`) fails if either
+// exceeds the baseline by more than 10%.
+// ---------------------------------------------------------------------------
+
+fn read_baseline(path: &std::path::Path, section: &str) -> (u64, u64) {
+    let contents = std::fs::read_to_string(path).unwrap();
+    let section_header = std::format!("[{section}]");
+    let mut in_section = false;
+    let mut cpu = None;
+    let mut memory = None;
+
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_section = trimmed == section_header;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("cpu = ") {
+            cpu = Some(value.replace('_', "").parse::<u64>().unwrap());
+        } else if let Some(value) = trimmed.strip_prefix("memory = ") {
+            memory = Some(value.replace('_', "").parse::<u64>().unwrap());
+        }
+    }
+
+    let cpu = cpu.expect("missing cpu baseline");
+    let memory = memory.expect("missing memory baseline");
+    (cpu, memory)
+}
+
+fn baseline_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("budget-baselines.toml")
+}
+
+fn assert_budget_within_threshold(measured: (u64, u64), baseline: (u64, u64), label: &str) {
+    let (measured_cpu, measured_memory) = measured;
+    let (baseline_cpu, baseline_memory) = baseline;
+    let cpu_limit = (baseline_cpu as f64 * 1.10).ceil() as u64;
+    let memory_limit = (baseline_memory as f64 * 1.10).ceil() as u64;
+
+    assert!(
+        measured_cpu <= cpu_limit,
+        "{label} CPU regression: measured {measured_cpu}, baseline {baseline_cpu}, limit {cpu_limit}"
+    );
+    assert!(
+        measured_memory <= memory_limit,
+        "{label} memory regression: measured {measured_memory}, baseline {baseline_memory}, limit {memory_limit}"
+    );
+}
+
+#[test]
+fn test_budget_regression_is_frozen() {
+    let env = Env::default();
+    let (_admin, client) = setup(&env);
+
+    let mut budget = env.cost_estimate().budget();
+    budget.reset_default();
+    assert!(!client.is_frozen());
+
+    let measured = (budget.cpu_instruction_cost(), budget.memory_bytes_cost());
+    std::println!(
+        "circuit-breaker.is_frozen: cpu = {}, memory = {}",
+        measured.0, measured.1
+    );
+
+    let baseline = read_baseline(&baseline_path(), "circuit-breaker.is_frozen");
+    assert_budget_within_threshold(measured, baseline, "circuit-breaker is_frozen");
 }
