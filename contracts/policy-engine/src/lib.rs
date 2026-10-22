@@ -568,24 +568,6 @@ impl PolicyEngine {
     /// on-chain regardless of the result. `Err` is returned only for
     /// configuration failures (e.g. the contract was never initialized).
     pub fn evaluate(env: Env, from: Address, to: Address) -> Result<bool, Error> {
-        // Emergency freeze short-circuit: if a configured circuit-breaker is
-        // frozen, deny outright without evaluating any registered checks.
-        let breaker_addr: Option<Address> = env
-            .storage()
-            .instance()
-            .get::<DataKey, Address>(&DataKey::CircuitBreaker);
-        if let Some(addr) = breaker_addr {
-            if CircuitBreakerClient::new(&env, &addr).is_frozen() {
-                PolicyResult {
-                    passed: false,
-                    from: from.clone(),
-                    to: to.clone(),
-                }
-                .publish(&env);
-                return Ok(false);
-            }
-        }
-
         let checks: Vec<CheckKind> = env
             .storage()
             .instance()
@@ -596,49 +578,7 @@ impl PolicyEngine {
             .instance()
             .get(&DataKey::CombineOp)
             .ok_or(Error::NotInitialized)?;
-
-        let passed = match op {
-            CombineOp::All => {
-                // All checks must pass for both from and to.
-                let mut all_pass = true;
-                for i in 0..checks.len() {
-                    let check = checks.get(i).unwrap();
-                    if !Self::run_check(&env, &check, &from)
-                        || !Self::run_check(&env, &check, &to)
-                    {
-                        all_pass = false;
-                        break;
-                    }
-                }
-                all_pass
-            }
-            CombineOp::Any => {
-                // At least one check must pass for both from and to.
-                if checks.is_empty() {
-                    false
-                } else {
-                    let mut any_pass = false;
-                    for i in 0..checks.len() {
-                        let check = checks.get(i).unwrap();
-                        if Self::run_check(&env, &check, &from)
-                            && Self::run_check(&env, &check, &to)
-                        {
-                            any_pass = true;
-                            break;
-                        }
-                    }
-                    any_pass
-                }
-            }
-        };
-
-        PolicyResult {
-            passed,
-            from: from.clone(),
-            to: to.clone(),
-        }
-        .publish(&env);
-
+        let (passed, _) = Self::evaluate_inner(&env, &checks, &op, &from, &to);
         Ok(passed)
     }
 
@@ -646,10 +586,20 @@ impl PolicyEngine {
     ///
     /// Returns a `Vec<bool>` containing the pass/fail status for each pair in the same order.
     pub fn batch_evaluate(env: Env, pairs: Vec<AddressPair>) -> Result<Vec<bool>, Error> {
+        let checks: Vec<CheckKind> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Checks)
+            .ok_or(Error::NotInitialized)?;
+        let op: CombineOp = env
+            .storage()
+            .instance()
+            .get(&DataKey::CombineOp)
+            .ok_or(Error::NotInitialized)?;
         let mut results = Vec::new(&env);
         for pair in pairs.iter() {
-            let res = Self::evaluate(env.clone(), pair.from, pair.to)?;
-            results.push_back(res);
+            let (passed, _) = Self::evaluate_inner(&env, &checks, &op, &pair.from, &pair.to);
+            results.push_back(passed);
         }
         Ok(results)
     }
@@ -672,23 +622,6 @@ impl PolicyEngine {
         from: Address,
         to: Address,
     ) -> Result<(bool, Option<CheckFailure>), Error> {
-        // Emergency freeze short-circuit (same as `evaluate`).
-        let breaker_addr: Option<Address> = env
-            .storage()
-            .instance()
-            .get::<DataKey, Address>(&DataKey::CircuitBreaker);
-        if let Some(addr) = breaker_addr {
-            if CircuitBreakerClient::new(&env, &addr).is_frozen() {
-                PolicyResult {
-                    passed: false,
-                    from: from.clone(),
-                    to: to.clone(),
-                }
-                .publish(&env);
-                return Ok((false, None));
-            }
-        }
-
         let checks: Vec<CheckKind> = env
             .storage()
             .instance()
@@ -699,20 +632,44 @@ impl PolicyEngine {
             .instance()
             .get(&DataKey::CombineOp)
             .ok_or(Error::NotInitialized)?;
+        let result = Self::evaluate_inner(&env, &checks, &op, &from, &to);
+        Ok(result)
+    }
 
-        let (passed, failure) = match op {
+    fn evaluate_inner(
+        env: &Env,
+        checks: &Vec<CheckKind>,
+        op: &CombineOp,
+        from: &Address,
+        to: &Address,
+    ) -> (bool, Option<CheckFailure>) {
+        let breaker_addr: Option<Address> = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::CircuitBreaker);
+        if let Some(addr) = breaker_addr {
+            if CircuitBreakerClient::new(env, &addr).is_frozen() {
+                PolicyResult {
+                    passed: false,
+                    from: from.clone(),
+                    to: to.clone(),
+                }
+                .publish(env);
+                return (false, None);
+            }
+        }
+
+        let result = match op {
             CombineOp::All => {
                 let mut result = (true, None);
                 for i in 0..checks.len() {
                     let check = checks.get(i).unwrap();
-                    if !Self::run_check(&env, &check, &from)
-                        || !Self::run_check(&env, &check, &to)
-                    {
+                    if !Self::run_check(env, &check, from) || !Self::run_check(env, &check, to) {
                         result = (
                             false,
                             Some(CheckFailure {
                                 check_index: i,
-                                kind: Self::check_kind_symbol(&env, &check),
+                                kind: Self::check_kind_symbol(env, &check),
                             }),
                         );
                         break;
@@ -727,9 +684,7 @@ impl PolicyEngine {
                     let mut any_pass = false;
                     for i in 0..checks.len() {
                         let check = checks.get(i).unwrap();
-                        if Self::run_check(&env, &check, &from)
-                            && Self::run_check(&env, &check, &to)
-                        {
+                        if Self::run_check(env, &check, from) && Self::run_check(env, &check, to) {
                             any_pass = true;
                             break;
                         }
@@ -737,13 +692,12 @@ impl PolicyEngine {
                     if any_pass {
                         (true, None)
                     } else {
-                        // Surface the first check as the representative failure.
                         let first = checks.get(0).unwrap();
                         (
                             false,
                             Some(CheckFailure {
                                 check_index: 0,
-                                kind: Self::check_kind_symbol(&env, &first),
+                                kind: Self::check_kind_symbol(env, &first),
                             }),
                         )
                     }
@@ -752,13 +706,12 @@ impl PolicyEngine {
         };
 
         PolicyResult {
-            passed,
+            passed: result.0,
             from: from.clone(),
             to: to.clone(),
         }
-        .publish(&env);
-
-        Ok((passed, failure))
+        .publish(env);
+        result
     }
 
     // -----------------------------------------------------------------------
