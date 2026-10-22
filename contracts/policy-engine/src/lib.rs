@@ -74,21 +74,19 @@
 //!
 //! ## Upgradeability
 //!
-//! `upgrade(admin, new_wasm_hash)` lets the configured admin move the
-//! contract's code to a new WASM hash via
-//! `env.deployer().update_current_contract_wasm`, following the same
-//! admin-gated pattern used elsewhere in the repo (see `jurisdiction-flag`).
-//! Storage (the admin key, `CombineOp`, and the registered `Checks` vec) is
-//! untouched by the WASM swap, so all state is preserved and the contract
-//! remains fully callable immediately after the upgrade. Only the admin can
-//! call `upgrade`; any other caller is rejected with `Error::NotAuthorized`.
+//! The admin can propose an upgrade with `propose_upgrade(admin, new_wasm,
+//! delay_ledgers)`. It can only be installed with `commit_upgrade` after the
+//! delay expires, and the admin can call `cancel_upgrade` during that window.
+//! The WASM swap preserves contract storage, including the admin, policy, and
+//! checks. A successful commit emits `UpgradePerformed`.
 //!
 //! ## Storage and TTL policy
 //!
 //! All state (admin, `CombineOp`, the `Checks` vec and the optional
 //! circuit-breaker address) lives in **instance** storage, which shares a
 //! single TTL with the contract instance itself. Every write path
-//! (`initialize`, `set_circuit_breaker`, `add_check`, `remove_check`)
+//! (`initialize`, `set_circuit_breaker`, `add_check`, `remove_check`,
+//! `propose_upgrade`, `cancel_upgrade`)
 //! finishes by extending that TTL: whenever the remaining TTL has dropped
 //! below [`INSTANCE_TTL_THRESHOLD`] (~7 days) it is bumped back up to
 //! [`INSTANCE_TTL_EXTEND_TO`] (~90 days). This keeps the policy from being
@@ -278,6 +276,15 @@ enum DataKey {
     /// Address of the `circuit-breaker` contract to consult, if any. When
     /// set and frozen, `evaluate` short-circuits to deny.
     CircuitBreaker,
+    PendingUpgrade,
+}
+
+/// Delayed upgrade proposal state.
+#[contracttype]
+#[derive(Clone)]
+pub struct UpgradeState {
+    pub new_wasm: BytesN<32>,
+    pub activated_at: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +320,9 @@ pub enum Error {
     ContractPaused = 7,
     /// Returned by `get_check` when the requested index is out of range.
     CheckIndexOutOfRange = 8,
+    /// Returned by `commit_upgrade` when no upgrade is pending or its delay
+    /// has not elapsed.
+    UpgradeNotReady = 9,
 }
 
 /// Maximum number of checks that can be registered in a single policy
@@ -470,6 +480,52 @@ impl PolicyEngine {
     /// Returns the currently registered `circuit-breaker` address, if any.
     pub fn circuit_breaker(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::CircuitBreaker)
+    }
+
+    /// Propose an upgrade to an uploaded Wasm hash. The admin may cancel it
+    /// before `delay_ledgers` have elapsed.
+    pub fn propose_upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm: BytesN<32>,
+        delay_ledgers: u32,
+    ) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        let state = UpgradeState {
+            new_wasm,
+            activated_at: u64::from(env.ledger().sequence())
+                .saturating_add(delay_ledgers as u64),
+        };
+        env.storage().instance().set(&DataKey::PendingUpgrade, &state);
+        Self::extend_instance_ttl(&env);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("upgprop"),), (admin, delay_ledgers));
+        Ok(())
+    }
+
+    /// Commit a pending upgrade after its delay has elapsed.
+    pub fn commit_upgrade(env: Env, admin: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        let state: UpgradeState = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingUpgrade)
+            .ok_or(Error::UpgradeNotReady)?;
+        if u64::from(env.ledger().sequence()) < state.activated_at {
+            return Err(Error::UpgradeNotReady);
+        }
+        env.deployer().update_current_contract_wasm(state.new_wasm);
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+        UpgradePerformed { admin }.publish(&env);
+        Ok(())
+    }
+
+    /// Cancel a pending upgrade. Admin-only.
+    pub fn cancel_upgrade(env: Env, admin: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+        Self::extend_instance_ttl(&env);
+        Ok(())
     }
 
     // -----------------------------------------------------------------------

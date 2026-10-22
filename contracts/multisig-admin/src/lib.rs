@@ -114,8 +114,9 @@
 //!
 //! `upgrade(new_wasm_hash)` moves the contract's code to a new WASM hash via
 //! `env.deployer().update_current_contract_wasm`, following the same
-//! admin-gated pattern as `jurisdiction-flag::upgrade` and
-//! `policy-engine::upgrade`. Because this contract *is* the admin, the gate is
+//! admin-gated pattern as `jurisdiction-flag::upgrade` and the
+//! `policy-engine::propose_upgrade` / `commit_upgrade` / `cancel_upgrade` flow.
+//! Because this contract *is* the admin, the gate is
 //! `env.current_contract_address().require_auth()` — the upgrade must be
 //! approved by the current M-of-N signer threshold through `__check_auth`,
 //! exactly like `add_signer` / `update_threshold`.
