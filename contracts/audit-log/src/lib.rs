@@ -23,6 +23,41 @@
 //!   than high-throughput transfer events; for the latter, rely on the
 //!   standard Soroban event stream.
 //!
+//! ## Callers
+//!
+//! - **Writers (`record`)** — contracts registered as an audit-log source.
+//!   The caller passes its own address as `source`, and that address must
+//!   authorize the invocation (`source.require_auth()`), so one primitive
+//!   cannot write entries attributed to another. The ledger sequence is
+//!   stamped on each entry by the log itself.
+//! - **Admin (`initialize`, `pause`, `unpause`)** — the address passed to
+//!   `initialize` (exactly once) can pause and resume writes. The admin is
+//!   *not* checked on `record`: any authorized `source` may write while the
+//!   log is unpaused.
+//! - **Readers (`get_entry`, `entry_count`, `list_entries`, `is_paused`)** —
+//!   unauthenticated. Any contract, client, or script can read. `list_entries`
+//!   returns at most [`MAX_PAGE_SIZE`] entries per call and fails with
+//!   `PageTooLarge` above that, so larger reads page through `start`.
+//! - **Indexers** — subscribe to the `ComplianceEvent` contract event
+//!   (topics: `kind`, `subject`) rather than polling storage.
+//!
+//! ## Composition with the other primitives
+//!
+//! `audit-log` has no dependency on the other compliance contracts; its only
+//! workspace dependency is the shared `compliance-pausable` crate, which
+//! provides the pause storage and the write guard used by `pause`,
+//! `unpause`, and `record`.
+//!
+//! - **`denylist-gate`** is the reference integration. It depends on this
+//!   crate and exposes `set_audit_log(admin, audit_log_id)`. Once set, each
+//!   denylist add and remove calls `record` through the generated
+//!   `AuditLogClient`, with `deny_add` / `deny_remove` as the kind and the
+//!   denylisted address as the subject.
+//! - **`AuditLogInterface`** (below) is the trait to copy or depend on when a
+//!   caller wants to invoke `record` without linking this contract's binary.
+//! - Other primitives do not write to the log today. Wiring one in follows
+//!   the same opt-in pattern.
+//!
 //! ## Opt-in integration pattern
 //!
 //! This contract is **not** called automatically by the other primitives.
@@ -37,8 +72,8 @@
 //!
 //! If `set_audit_log` is never called, the primitive behaves exactly as
 //! before: the audit log path is guarded by an `if let Some(...)` check on
-//! the stored audit-log address, so the cost and code path are zero when
-//! the feature is not configured.
+//! the stored audit-log address, so it adds no cross-contract call when the
+//! feature is not configured.
 #![no_std]
 
 use soroban_sdk::{
@@ -119,7 +154,7 @@ pub enum Error {
 // Cross-contract client trait (for callers of this contract)
 // ---------------------------------------------------------------------------
 
-/// Trait that generates `AuditLogClient` via `#[contractclient]`. Other
+/// Trait that generates `AuditLogInterfaceClient` via `#[contractclient]`. Other
 /// contracts that want to cross-call `audit-log.record(...)` should define
 /// this same trait locally (or depend on this crate's `rlib`) and use the
 /// generated client rather than linking the full contract binary.
