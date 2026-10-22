@@ -39,7 +39,14 @@
 //!   approved it.
 //! - Removals are validated before an approval is recorded: the set can never
 //!   shrink to empty, nor below the threshold (`InvalidSignerSet` /
-//!   `InvalidThreshold`).
+//!   `InvalidThreshold`). To remove a signer from a set that is already at its
+//!   threshold, lower the threshold first.
+//! - `set_threshold` goes through the same approval flow. Each call records an
+//!   approval of `SetThreshold(n)`, applied once `threshold` distinct current
+//!   signers have approved it. When applied, `n` must satisfy
+//!   `1 <= n <= signers.len()` (`InvalidThreshold`), and a `ThresholdChanged`
+//!   event is emitted. The threshold can therefore be raised or lowered, e.g. a
+//!   3-of-3 set can lower to 2-of-3 and then remove a lost key.
 #![no_std]
 
 use soroban_sdk::{
@@ -96,6 +103,7 @@ pub struct SignerSet {
 pub enum SignerAction {
     Add(Address),
     Remove(Address),
+    SetThreshold(u32),
 }
 
 #[contractclient(name = "AuditLogClient")]
@@ -141,6 +149,12 @@ pub struct SignerAdded {
 pub struct SignerRemoved {
     #[topic]
     pub signer: Address,
+}
+
+#[contractevent]
+pub struct ThresholdChanged {
+    pub old_threshold: u32,
+    pub new_threshold: u32,
 }
 
 #[contractevent]
@@ -544,6 +558,16 @@ impl DenylistGate {
         Self::approve(&env, caller, SignerAction::Remove(signer_to_remove), signer_set)
     }
 
+    /// Approve changing the signing threshold to `new_threshold`. `caller` must
+    /// authorize the call and be in the current signer set. The threshold is
+    /// changed once `threshold` distinct signers have approved this exact
+    /// action; `new_threshold` must be between 1 and the signer count at that
+    /// point.
+    pub fn set_threshold(env: Env, caller: Address, new_threshold: u32) -> Result<(), Error> {
+        let signer_set = Self::require_signer(&env, &caller)?;
+        Self::approve(&env, caller, SignerAction::SetThreshold(new_threshold), signer_set)
+    }
+
     /// The current signer set, or empty when multisig is not enabled.
     pub fn signers(env: Env) -> Vec<Address> {
         env.storage()
@@ -624,6 +648,19 @@ impl DenylistGate {
                 signer_set.signers = remaining;
                 env.storage().instance().set(&DataKey::SignerSet, &signer_set);
                 SignerRemoved { signer: removed }.publish(env);
+            }
+            SignerAction::SetThreshold(new_threshold) => {
+                if new_threshold == 0 || new_threshold > signer_set.signers.len() {
+                    return Err(Error::InvalidThreshold);
+                }
+                let old_threshold = signer_set.threshold;
+                signer_set.threshold = new_threshold;
+                env.storage().instance().set(&DataKey::SignerSet, &signer_set);
+                ThresholdChanged {
+                    old_threshold,
+                    new_threshold,
+                }
+                .publish(env);
             }
         }
         Ok(())
