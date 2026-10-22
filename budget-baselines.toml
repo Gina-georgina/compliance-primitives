@@ -45,3 +45,11 @@ memory = 400000
 [multisig-admin.__check_auth]
 cpu = 250000
 memory = 40000
+
+# circuit-breaker's hottest entrypoint: `is_frozen`, read on every check by
+# consumers such as `compliance-aggregator`. Measured by
+# `test_budget_regression_is_frozen`. CI fails if either value regresses by
+# more than 10%.
+[circuit-breaker.is_frozen]
+cpu = 1
+memory = 1
