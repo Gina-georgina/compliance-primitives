@@ -208,6 +208,16 @@ fn test_add_and_remove_check() {
 }
 
 #[test]
+fn test_remove_check_out_of_bounds_returns_contract_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (admin, _engine_id, client) = setup_engine_all(&env);
+
+    let result = client.try_remove_check(&admin, &0u32);
+    assert_eq!(result, Err(Ok(Error::IndexOutOfBounds)));
+}
+
+#[test]
 fn test_clear_checks_resets_policy_to_empty() {
     let env = Env::default();
     env.mock_all_auths();
