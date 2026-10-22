@@ -11,6 +11,7 @@ members = [
     "contracts/pausable",
     "contracts/policy-engine",
     "contracts/multisig-admin",
+    "examples/circuit-breaker-consumer",
     "examples/circuit-breaker-policy-engine",
     "examples/allowlist-token-usage",
     "examples/denylist-gate-consumer",
