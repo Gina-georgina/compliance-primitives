@@ -48,13 +48,11 @@
 //!     must be provable on-chain, rely on the Soroban event stream and an
 //!     off-chain indexer for the rest, and consider committing a periodic
 //!     hash or Merkle root of a batch on-chain instead of every event.
-//! - **TTL gap** — this contract does not call `extend_ttl` on entries, so
-//!   each persistent entry expires unless something else bumps it. Once an
-//!   entry is archived, reads of it fail until it is restored. Issuers
-//!   relying on long retention must either add TTL extension in the
-//!   contract or run an external restore/extend process; until then, do not
-//!   treat `get_entry` as a durable record beyond the network's persistent
-//!   TTL window.
+//! - **TTL** — `record` extends each new entry's TTL (see "Storage and TTL
+//!   policy" below), but entries that are never touched again still expire
+//!   once that window lapses. Issuers relying on retention beyond ~90 days
+//!   must run an external restore/extend process; until then, do not treat
+//!   `get_entry` as a durable record past that window.
 //!
 //! ## Callers
 //!
@@ -107,6 +105,15 @@
 //! before: the audit log path is guarded by an `if let Some(...)` check on
 //! the stored audit-log address, so it adds no cross-contract call when the
 //! feature is not configured.
+//!
+//! ## Storage and TTL policy
+//!
+//! Each log entry lives in **persistent** storage under its own key. Every
+//! write path (`record`) extends that entry's TTL: whenever the remaining TTL
+//! has dropped below [`ENTRY_TTL_THRESHOLD`] (~7 days) it is bumped back up to
+//! [`ENTRY_TTL_EXTEND_TO`] (~90 days). This keeps recorded events from being
+//! archived by Soroban state expiration — an archived entry would make
+//! `get_entry` and `list_entries` return nothing until a manual restore.
 #![no_std]
 
 use soroban_sdk::{
@@ -118,6 +125,13 @@ use soroban_sdk::{
 /// Bounds the resources consumed by a single invocation regardless of how
 /// large `limit` is requested.
 pub const MAX_PAGE_SIZE: u32 = 100;
+
+/// Extend a persistent log entry when its remaining TTL drops below this many
+/// ledgers (~7 days at ~5s/ledger).
+pub const ENTRY_TTL_THRESHOLD: u32 = 120_960;
+/// Target remaining TTL, in ledgers, after an entry is extended (~90 days at
+/// ~5s/ledger).
+pub const ENTRY_TTL_EXTEND_TO: u32 = 1_555_200;
 
 // ---------------------------------------------------------------------------
 // Storage types
@@ -307,9 +321,11 @@ impl AuditLog {
             ledger: env.ledger().sequence(),
         };
 
+        let entry_key = DataKey::Entry(index);
+        env.storage().persistent().set(&entry_key, &entry);
         env.storage()
             .persistent()
-            .set(&DataKey::Entry(index), &entry);
+            .extend_ttl(&entry_key, ENTRY_TTL_THRESHOLD, ENTRY_TTL_EXTEND_TO);
 
         env.storage()
             .instance()
