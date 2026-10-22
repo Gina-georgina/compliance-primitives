@@ -146,8 +146,27 @@ impl CircuitBreaker {
         Ok(())
     }
 
-    pub fn is_frozen(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::Frozen).unwrap_or(false)
+    /// Returns `Ok(true)` if the breaker is frozen, `Ok(false)` if it is
+    /// unfrozen.
+    ///
+    /// Returns `Err(Error::NotInitialized)` if the contract has never been
+    /// initialized — i.e. `initialize` was never called.  Callers **must**
+    /// treat this error as a hard failure (deny the transfer / flag a
+    /// misconfiguration) rather than assuming the breaker is open.  This
+    /// prevents the silent fail-open behaviour that occurred when
+    /// `unwrap_or(false)` was used: a consumer pointing at a freshly-deployed
+    /// but uninitialized contract would see `is_frozen == false` and happily
+    /// allow all transfers even though no legitimate admin had ever set the
+    /// breaker up.
+    pub fn is_frozen(env: Env) -> Result<bool, Error> {
+        if !env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::NotInitialized);
+        }
+        Ok(env
+            .storage()
+            .instance()
+            .get(&DataKey::Frozen)
+            .unwrap_or(false))
     }
 
     /// Returns the current admin address, or `Err(Error::NotInitialized)` if

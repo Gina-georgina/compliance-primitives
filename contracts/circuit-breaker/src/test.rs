@@ -79,13 +79,17 @@ fn test_non_admin_cannot_freeze_or_unfreeze() {
 }
 
 #[test]
-fn test_is_frozen_before_initialize_returns_false() {
+fn test_is_frozen_before_initialize_returns_not_initialized_error() {
     let env = Env::default();
     let contract_id = env.register(CircuitBreaker, ());
     let client = CircuitBreakerClient::new(&env, &contract_id);
-    // Never called `initialize` on this instance. `is_frozen` should
-    // return a sensible default (`false`) rather than panicking.
-    assert!(!client.is_frozen());
+    // Never called `initialize` on this instance.  `is_frozen` must now
+    // return `Err(NotInitialized)` instead of silently returning `false`.
+    // Callers (compliance-aggregator, policy-engine) must treat this as a
+    // hard failure — failing open on an uninitialized breaker is a
+    // security vulnerability (issue #607).
+    let result = client.try_is_frozen();
+    assert_eq!(result, Err(Ok(Error::NotInitialized)));
 }
 
 #[test]
