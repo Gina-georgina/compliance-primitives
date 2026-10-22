@@ -23,6 +23,39 @@
 //!   than high-throughput transfer events; for the latter, rely on the
 //!   standard Soroban event stream.
 //!
+//! ## Write volume and storage growth
+//!
+//! Each `record` call does two storage writes: one new persistent entry at
+//! `DataKey::Entry(index)` and an update to the `EntryCount` counter in
+//! instance storage. Both are unmeasured estimates here; re-measure with the
+//! method in `BENCHMARKS.md` before relying on any number.
+//!
+//! - **Per-entry footprint** — roughly 150–300 bytes for typical entries
+//!   (two `Address` values, a `Symbol`, a `detail` string of up to a few
+//!   dozen bytes, and a `u32` ledger). Rent scales with bytes × retained
+//!   ledgers, so total storage cost grows linearly with event count and
+//!   retention period.
+//! - **Throughput ceiling** — every `record` on one instance reads and
+//!   writes the same `EntryCount` key, so calls serialize. A single audit
+//!   log cannot absorb more than roughly one `record` per ledger (about one
+//!   every ~5 seconds), and bursts of concurrent submissions should be
+//!   expected to fail and need retry.
+//! - **Volume guidance** (indicative, not benchmarked):
+//!   - up to ~1,000 events/day: direct on-chain logging is comfortable;
+//!   - ~1,000–10,000 events/day: viable, but budget for rent and retry
+//!     handling, and keep `detail` short;
+//!   - above ~10,000 events/day: keep the on-chain log for the events that
+//!     must be provable on-chain, rely on the Soroban event stream and an
+//!     off-chain indexer for the rest, and consider committing a periodic
+//!     hash or Merkle root of a batch on-chain instead of every event.
+//! - **TTL gap** — this contract does not call `extend_ttl` on entries, so
+//!   each persistent entry expires unless something else bumps it. Once an
+//!   entry is archived, reads of it fail until it is restored. Issuers
+//!   relying on long retention must either add TTL extension in the
+//!   contract or run an external restore/extend process; until then, do not
+//!   treat `get_entry` as a durable record beyond the network's persistent
+//!   TTL window.
+//!
 //! ## Callers
 //!
 //! - **Writers (`record`)** — contracts registered as an audit-log source.
