@@ -174,6 +174,7 @@ pub enum Error {
     NoChecksRegistered = 4,
     EmptyAddressList = 5,
     BatchTooLarge = 6,
+    ContractPaused = 7,
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +294,7 @@ impl ComplianceAggregator {
     /// Register or replace the `circuit-breaker` contract address. Admin-only.
     /// Pass this to enable emergency-freeze short-circuiting of all checks.
     pub fn set_circuit_breaker(env: Env, admin: Address, breaker: Address) -> Result<(), Error> {
+        compliance_pausable::require_not_paused_or(&env, Error::ContractPaused)?;
         Self::require_admin(&env, &admin)?;
         env.storage()
             .instance()

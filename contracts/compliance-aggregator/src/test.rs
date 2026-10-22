@@ -142,6 +142,17 @@ fn test_set_admin_rejects_non_admin() {
 }
 
 #[test]
+fn test_set_circuit_breaker_rejects_changes_while_paused() {
+    let env = Env::default();
+    let (_, _, _, _, admin, _, client) = setup_all(&env);
+    let breaker = Address::generate(&env);
+    client.pause(&admin);
+
+    let result = client.try_set_circuit_breaker(&admin, &breaker);
+    assert_eq!(result, Err(Ok(Error::ContractPaused)));
+}
+
+#[test]
 fn test_set_denylist_gate_rejects_non_admin() {
     let env = Env::default();
     let (_, _, _, _, _, _, client) = setup_all(&env);
