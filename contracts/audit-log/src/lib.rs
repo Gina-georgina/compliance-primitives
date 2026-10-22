@@ -283,6 +283,16 @@ impl AuditLog {
             .get(&DataKey::Entry(index))
     }
 
+    /// Return up to `count` log entries starting at zero-based index `start`.
+    ///
+    /// Unlike [`AuditLog::list_entries`], an oversized `count` is clamped to
+    /// [`MAX_PAGE_SIZE`] rather than rejected. Fewer entries are returned when
+    /// the range runs past `entry_count()`.
+    pub fn get_entries(env: Env, start: u64, count: u32) -> Vec<LogEntry> {
+        let limit = count.min(MAX_PAGE_SIZE);
+        Self::list_entries(env.clone(), start, limit).unwrap_or(Vec::new(&env))
+    }
+
     /// Return the total number of entries recorded so far.
     pub fn entry_count(env: Env) -> u64 {
         env.storage()
