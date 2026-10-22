@@ -105,6 +105,17 @@ impl CircuitBreaker {
 
     pub fn freeze(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
+        // Idempotency: if already frozen, skip the write and event so that
+        // indexers and dashboards see exactly one Frozen event per incident,
+        // and freeze-duration metrics remain correct.
+        let already_frozen: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Frozen)
+            .unwrap_or(false);
+        if already_frozen {
+            return Ok(());
+        }
         env.storage().instance().set(&DataKey::Frozen, &true);
         Self::extend_instance_ttl(&env);
         Frozen {
@@ -116,6 +127,16 @@ impl CircuitBreaker {
 
     pub fn unfreeze(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
+        // Idempotency: if already unfrozen, skip the write and event so that
+        // duplicate calls from retrying scripts don't produce spurious events.
+        let currently_frozen: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Frozen)
+            .unwrap_or(false);
+        if !currently_frozen {
+            return Ok(());
+        }
         env.storage().instance().set(&DataKey::Frozen, &false);
         Self::extend_instance_ttl(&env);
         Unfrozen {
