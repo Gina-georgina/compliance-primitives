@@ -11,22 +11,37 @@
 //! back a single aggregated pass/fail result plus a per-check breakdown for
 //! audit purposes.
 //!
-//! ## Relationship to #109 (`PolicyEngine`)
+//! ## Callers
 //!
-//! Issue #109 proposes a `PolicyEngine` capable of expressing AND/OR policy
-//! logic over an arbitrary set of predicates. This contract deliberately does
-//! *not* re-implement that: all checks here are AND-composed (an address must
-//! pass every registered check to be permitted), and there is no support for
-//! OR branches or rule weights. The two concerns are complementary:
+//! - **Consumer contracts** (the primary callers) — typically a token's
+//!   `transfer` path — invoke `check_address` for one address, or `check_all` /
+//!   `batch_check` for several, before moving value, and refuse the transfer
+//!   when the result is `false`. These entrypoints are permissionless and
+//!   require no auth.
+//! - **The admin** (an issuer key or, preferably, a `multisig-admin` contract
+//!   address) calls `initialize`, `set_denylist_gate`, `set_jurisdiction_flag`,
+//!   `set_circuit_breaker`, `set_admin`, `pause`, `unpause`, and `upgrade`.
+//!   Every mutation requires the admin's auth.
+//! - **Off-chain tooling and auditors** call the read-only views
+//!   (`get_config`, `get_checks_summary`, `is_paused`) and consume the
+//!   configuration events to reconstruct which checks were registered when.
 //!
-//! - **`compliance-aggregator`** (this contract): reduces host-level
-//!   cross-contract call overhead for common AND-combinations of the existing
-//!   primitives. Simple, predictable, auditable.
-//! - **`PolicyEngine`** (#109): expresses richer boolean policy DAGs over
-//!   an arbitrary set of check predicates. Should that contract land, its
-//!   `evaluate` entrypoint could call `compliance-aggregator.check_address`
-//!   as one of its predicates, or the two could be merged — that decision
-//!   belongs in #109's PR.
+//! ## Composition
+//!
+//! | Contract | Relationship to `compliance-aggregator` |
+//! |---|---|
+//! | `denylist-gate` | Registered as `DenylistGate`; `check(address)` runs for every address. |
+//! | `jurisdiction-flag` | Registered as `JurisdictionFlag`; `is_permitted_jurisdiction(address, allowed_codes)` runs for every address. A failed or erroring call counts as a failure. |
+//! | `circuit-breaker` | Optional emergency stop. When configured and frozen, every address is denied without running any check. |
+//! | `multisig-admin` | Recommended `admin` value, so reconfiguration needs M-of-N approval. |
+//! | `compliance-pausable` | Shared crate used to guard the pause flag. |
+//! | `policy-engine` | Sibling, not a dependency. This contract is a fixed AND-only fan-out optimised for call overhead; `policy-engine` is the configurable AND / OR layer, and it also supports `allowlist-token` checks this contract does not. Pick one per integration. |
+//! | `allowlist-token`, `audit-log`, `compliance-check` | Not called by this contract. Allowlist checks are available only through `policy-engine`. `audit-log` is the place to record on-chain trails of configuration changes; this contract emits events only. `compliance-check` is a compile-time trait crate and is not used at runtime. |
+//!
+//! Use this contract when a consumer needs only the AND-combination of the
+//! denylist and jurisdiction primitives and wants the lowest call overhead.
+//! Use `policy-engine` when the policy needs OR branches, weights, or the
+//! allowlist primitive.
 //!
 //! ## Contract interfaces used
 //!
