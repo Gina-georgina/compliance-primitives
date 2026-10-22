@@ -1,7 +1,22 @@
 #![no_std]
 
+//! ## Upgradeability
+//!
+//! `upgrade(admin, new_wasm_hash)` lets the configured admin move the
+//! contract's code to a new WASM hash via
+//! `env.deployer().update_current_contract_wasm`, following the same
+//! admin-gated pattern as `compliance-aggregator::upgrade`. Storage (the admin
+//! key, the frozen flag and any pending admin) is untouched by the WASM swap,
+//! so the freeze state survives the upgrade and the contract remains callable
+//! immediately after it. Only the admin can call `upgrade`; any other caller
+//! is rejected with `Error::NotAuthorized`.
+//!
+//! If a new version changes the storage layout, ship a migration entrypoint
+//! alongside it and call it after `upgrade`. See `STORAGE_VERSIONING.md`.
+
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, Address, Env, String,
+    contract, contracterror, contractevent, contractimpl, contracttype, Address, BytesN, Env,
+    String,
 };
 
 #[contracttype]
@@ -31,6 +46,15 @@ pub struct Frozen {
 pub struct Unfrozen {
     #[topic]
     pub admin: Address,
+}
+
+/// Emitted whenever the contract is upgraded to a new WASM implementation,
+/// for on-chain auditability of the upgrade path.
+#[contractevent]
+pub struct UpgradePerformed {
+    #[topic]
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
 }
 
 #[contracterror]
@@ -106,6 +130,23 @@ impl CircuitBreaker {
         }
         env.storage().instance().set(&DataKey::Admin, &new_admin);
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        Ok(())
+    }
+
+    /// Upgrade the contract WASM. Admin-only.
+    ///
+    /// Swaps the code behind this contract ID to `new_wasm_hash` (which must
+    /// already be uploaded to the network). The admin, frozen flag and pending
+    /// admin are preserved across the upgrade. See the module-level
+    /// "Upgradeability" section for the full procedure.
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        UpgradePerformed {
+            admin,
+            new_wasm_hash: new_wasm_hash.clone(),
+        }
+        .publish(&env);
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
     }
 

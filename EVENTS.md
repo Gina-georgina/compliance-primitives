@@ -229,6 +229,20 @@ data   : {}
 |---|---|---|---|
 | `admin` | `Address` | topic | Admin address that unfroze the contract |
 
+#### `UpgradePerformed`
+
+Emitted when the admin upgrades the contract to a new WASM hash.
+
+```
+topics : ["upgrade_performed", <admin: Address>]
+data   : { new_wasm_hash: BytesN<32> }
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `admin` | `Address` | topic | Admin address that performed the upgrade |
+| `new_wasm_hash` | `BytesN<32>` | data | WASM hash the contract was upgraded to |
+
 ---
 
 ## Cross-contract event ordering guarantees
