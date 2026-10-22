@@ -55,14 +55,17 @@
 //!
 //! ## Configured checks
 //!
-//! The admin registers up to one address for each of the two supported check
+//! The admin registers up to one address for each of the three supported check
 //! types:
 //!
 //! - `DenylistCheck` — calls `denylist-gate.check(address) -> bool`
 //! - `JurisdictionCheck` — calls
 //!   `jurisdiction-flag.is_permitted_jurisdiction(address, allowed_codes) -> bool`
+//! - `CircuitBreaker` — calls `circuit-breaker.is_frozen() -> bool`; the check
+//!   passes only while the breaker is not frozen. A frozen breaker denies
+//!   without consulting the other checks.
 //!
-//! Both checks are optional; if a check type's contract address has not been
+//! All checks are optional; if a check type's contract address has not been
 //! registered the check is skipped (treated as passing). Registering at least
 //! one check is enforced at call time.
 //!
@@ -206,6 +209,7 @@ pub struct CheckResult {
 pub enum CheckKind {
     Denylist = 0,
     Jurisdiction = 1,
+    CircuitBreaker = 2,
 }
 
 /// Per-address aggregated result returned by `check_all`.
@@ -499,17 +503,18 @@ impl ComplianceAggregator {
         }
     }
 
-    /// Returns `true` if a circuit-breaker is configured and it is
-    /// currently frozen.
-    fn is_frozen(env: &Env) -> bool {
-        let breaker_addr: Option<Address> = env
+    /// Evaluates the circuit-breaker check if one is configured. The result
+    /// passes only while the breaker is not frozen.
+    fn circuit_breaker_result(env: &Env) -> Option<CheckResult> {
+        let breaker_addr: Address = env
             .storage()
             .instance()
-            .get::<DataKey, Address>(&DataKey::CircuitBreaker);
-        match breaker_addr {
-            Some(addr) => CircuitBreakerClient::new(env, &addr).is_frozen(),
-            None => false,
-        }
+            .get::<DataKey, Address>(&DataKey::CircuitBreaker)?;
+        let frozen = CircuitBreakerClient::new(env, &breaker_addr).is_frozen();
+        Some(CheckResult {
+            check: CheckKind::CircuitBreaker,
+            passed: !frozen,
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -537,14 +542,19 @@ impl ComplianceAggregator {
         address: Address,
         allowed_jurisdictions: Vec<String>,
     ) -> Result<(bool, Vec<CheckResult>), Error> {
-        // Emergency freeze short-circuit: if a configured circuit-breaker is
-        // frozen, deny outright without evaluating the underlying checks.
-        if Self::is_frozen(&env) {
-            return Ok((false, Vec::new(&env)));
-        }
-
         let mut results: Vec<CheckResult> = Vec::new(&env);
         let mut all_passed = true;
+
+        // -- circuit-breaker check --
+        // Emergency freeze short-circuit: if a configured circuit-breaker is
+        // frozen, deny outright without evaluating the underlying checks.
+        if let Some(breaker) = Self::circuit_breaker_result(&env) {
+            let passed = breaker.passed;
+            results.push_back(breaker);
+            if !passed {
+                return Ok((false, results));
+            }
+        }
 
         // -- denylist-gate check --
         if let Some(gate_addr) = env
@@ -608,23 +618,9 @@ impl ComplianceAggregator {
             return Err(Error::EmptyAddressList);
         }
 
-        // Emergency freeze short-circuit: if a configured circuit-breaker is
-        // frozen, deny every address outright without evaluating the
-        // underlying checks.
-        if Self::is_frozen(&env) {
-            let mut batch: Vec<AddressCheckResult> = Vec::new(&env);
-            for address in addresses.iter() {
-                batch.push_back(AddressCheckResult {
-                    address,
-                    all_passed: false,
-                    checks: Vec::new(&env),
-                });
-            }
-            return Ok(batch);
-        }
-
         // Resolve contract addresses once, outside the per-address loop, to
         // avoid redundant storage reads.
+        let breaker: Option<CheckResult> = Self::circuit_breaker_result(&env);
         let gate_addr: Option<Address> = env
             .storage()
             .instance()
@@ -634,7 +630,7 @@ impl ComplianceAggregator {
             .instance()
             .get::<DataKey, Address>(&DataKey::JurisdictionFlag);
 
-        if gate_addr.is_none() && flag_addr.is_none() {
+        if breaker.is_none() && gate_addr.is_none() && flag_addr.is_none() {
             return Err(Error::NoChecksRegistered);
         }
 
@@ -644,28 +640,38 @@ impl ComplianceAggregator {
             let mut results: Vec<CheckResult> = Vec::new(&env);
             let mut all_passed = true;
 
-            if let Some(ref ga) = gate_addr {
-                let client = DenylistGateClient::new(&env, ga);
-                let passed = client.check(&address);
-                all_passed = all_passed && passed;
-                results.push_back(CheckResult {
-                    check: CheckKind::Denylist,
-                    passed,
-                });
+            // Emergency freeze short-circuit: if a configured circuit-breaker
+            // is frozen, deny this address without evaluating the underlying
+            // checks.
+            if let Some(ref b) = breaker {
+                all_passed = b.passed;
+                results.push_back(b.clone());
             }
 
-            if let Some(ref fa) = flag_addr {
-                let client = JurisdictionFlagClient::new(&env, fa);
-                let passed =
-                    matches!(
-                    client.try_is_permitted_jurisdiction(&address, &allowed_jurisdictions),
-                    Ok(Ok(true))
-                );
-                all_passed = all_passed && passed;
-                results.push_back(CheckResult {
-                    check: CheckKind::Jurisdiction,
-                    passed,
-                });
+            if all_passed {
+                if let Some(ref ga) = gate_addr {
+                    let client = DenylistGateClient::new(&env, ga);
+                    let passed = client.check(&address);
+                    all_passed = all_passed && passed;
+                    results.push_back(CheckResult {
+                        check: CheckKind::Denylist,
+                        passed,
+                    });
+                }
+
+                if let Some(ref fa) = flag_addr {
+                    let client = JurisdictionFlagClient::new(&env, fa);
+                    let passed =
+                        matches!(
+                        client.try_is_permitted_jurisdiction(&address, &allowed_jurisdictions),
+                        Ok(Ok(true))
+                    );
+                    all_passed = all_passed && passed;
+                    results.push_back(CheckResult {
+                        check: CheckKind::Jurisdiction,
+                        passed,
+                    });
+                }
             }
 
             batch.push_back(AddressCheckResult {

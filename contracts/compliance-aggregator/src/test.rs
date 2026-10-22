@@ -822,7 +822,9 @@ fn test_circuit_breaker_freeze_short_circuits_check_address() {
     // Before freezing, the check passes normally.
     let (all_passed, checks) = client.check_address(&alice, &vec![&env]);
     assert!(all_passed);
-    assert_eq!(checks.len(), 1);
+    assert_eq!(checks.len(), 2);
+    assert_eq!(checks.get(0).unwrap().check, CheckKind::CircuitBreaker);
+    assert!(checks.get(0).unwrap().passed);
 
     // Freeze mid-flow.
     breaker_client.freeze(&breaker_admin);
@@ -831,7 +833,9 @@ fn test_circuit_breaker_freeze_short_circuits_check_address() {
     // consulting the denylist-gate.
     let (all_passed, checks) = client.check_address(&alice, &vec![&env]);
     assert!(!all_passed);
-    assert!(checks.is_empty());
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks.get(0).unwrap().check, CheckKind::CircuitBreaker);
+    assert!(!checks.get(0).unwrap().passed);
 }
 
 #[test]
@@ -946,7 +950,7 @@ fn test_upgrade_preserves_state_and_remains_callable() {
     // And the contract is still callable after the upgrade.
     let (alice_ok, alice_checks) = client.check_address(&alice, &us_vec(&env));
     assert!(alice_ok);
-    assert_eq!(alice_checks.len(), 2);
+    assert_eq!(alice_checks.len(), 3);
     let (mallory_ok, _) = client.check_address(&mallory, &us_vec(&env));
     assert!(!mallory_ok);
 
