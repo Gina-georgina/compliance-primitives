@@ -127,6 +127,16 @@ pub struct DenyRemove {
     pub address: Address,
 }
 
+/// Emitted when the optional audit-log write fails (paused, archived, or
+/// reverting). The denylist mutation itself still succeeds; see
+/// `docs/fail-open-fail-closed-audit.md`.
+#[contractevent]
+pub struct AuditLogFailed {
+    pub kind: Symbol,
+    #[topic]
+    pub subject: Address,
+}
+
 #[contractevent]
 pub struct MultisigInitialized {
     pub threshold: u32,
@@ -697,18 +707,30 @@ impl DenylistGate {
         Err(Error::NotAuthorized)
     }
 
+    /// Best-effort audit write. A paused, archived, or reverting audit-log must
+    /// not block denylist mutations (fail-open on the audit dependency), so
+    /// failures are surfaced as an `AuditLogFailed` event instead of reverting.
     fn record_audit(env: &Env, kind: Symbol, subject: &Address, detail: &str) {
         if let Some(audit_log) = env
             .storage()
             .instance()
             .get::<DataKey, Address>(&DataKey::AuditLog)
         {
-            AuditLogClient::new(env, &audit_log).record(
-                &env.current_contract_address(),
-                &kind,
-                subject,
-                &String::from_str(env, detail),
-            );
+            let written = AuditLogClient::new(env, &audit_log)
+                .try_record(
+                    &env.current_contract_address(),
+                    &kind,
+                    subject,
+                    &String::from_str(env, detail),
+                )
+                .is_ok_and(|inner| inner.is_ok());
+            if !written {
+                AuditLogFailed {
+                    kind,
+                    subject: subject.clone(),
+                }
+                .publish(env);
+            }
         }
     }
 
