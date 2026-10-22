@@ -225,7 +225,7 @@ impl FlawedPausableConsumer {
 
     /// FLAWED: Mutating method that forgot the `require_not_paused` guard!
     pub fn unguarded_action(env: Env, val: u32) -> Result<(), ConsumerError> {
-        // Missing: pausable::require_not_paused(&env, ConsumerError::ContractPaused)?;
+        // Missing: pausable::require_not_paused_or(&env, ConsumerError::ContractPaused)?;
         env.storage().instance().set(&DataKey::FlagValue, &val);
         Ok(())
     }

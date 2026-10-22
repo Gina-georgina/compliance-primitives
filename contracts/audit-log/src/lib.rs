@@ -148,6 +148,8 @@ pub enum Error {
     NotAuthorized = 3,
     /// `limit` passed to `list_entries` exceeds [`MAX_PAGE_SIZE`].
     PageTooLarge = 4,
+    /// `record` was called while the contract is paused.
+    ContractPaused = 5,
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +325,19 @@ impl AuditLog {
         }
 
         Ok(entries)
+    }
+
+    fn require_admin(env: &Env, admin: &Address) -> Result<(), Error> {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if stored_admin != *admin {
+            return Err(Error::NotAuthorized);
+        }
+        Ok(())
     }
 }
 
