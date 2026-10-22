@@ -1,3 +1,53 @@
+//! `circuit-breaker` is a `#![no_std]` Soroban contract that holds a single,
+//! deployment-wide **emergency freeze flag**. Consumer contracts read the
+//! flag with `is_frozen()` and refuse to proceed while it is set.
+//!
+//! ## Purpose
+//!
+//! During an incident (an exploited bug, a sanctions designation that needs
+//! immediate effect, a compromised issuer key) an operator needs to stop
+//! compliance-gated activity everywhere at once. Pausing each primitive
+//! separately is slow and error-prone, so this contract provides one switch:
+//! `freeze` once, and every consumer that checks the flag fails closed.
+//! Unlike the per-contract `pausable` mechanism, the freeze is global to the
+//! deployment, not scoped to one contract.
+//!
+//! ## Who calls it
+//!
+//! - **The admin** calls `initialize` once, then `freeze` and `unfreeze`.
+//!   Every mutation requires the stored admin's auth. In production the admin
+//!   should be a `multisig-admin` contract address rather than a single key
+//!   (see `docs/emergency-freeze-design.md`).
+//! - **Admin transfer** is two-step: the current admin calls `propose_admin`,
+//!   and the proposed address calls `accept_admin`. The current admin keeps
+//!   control until the transfer is accepted, which avoids a mistyped address
+//!   locking the contract.
+//! - **Consumer contracts** (token and transfer contracts, policy evaluators)
+//!   call `is_frozen()` before running their own checks. The call is
+//!   permissionless and requires no auth.
+//! - **Off-chain tooling and monitors** read `is_frozen()` and `metadata()`,
+//!   and follow the `Frozen` / `Unfrozen` events to alert on state changes.
+//!
+//! ## How it composes with the other contracts
+//!
+//! | Contract | Relationship to `circuit-breaker` |
+//! |---|---|
+//! | `policy-engine` | Optional. Configured with `set_circuit_breaker`; when the flag is set, `evaluate` denies without running any check. |
+//! | `denylist-gate`, `allowlist-token`, `jurisdiction-flag` | Not wired to it directly. A token or wrapper that uses these primitives should call `is_frozen()` first, so the freeze stops transfers before any per-primitive check runs. |
+//! | `multisig-admin` | Recommended value for the `admin` address, so freezing and unfreezing require M-of-N approval. |
+//! | `pausable` | Complementary. Local, per-contract pause for routine maintenance; this contract is the incident-wide stop. |
+//! | `audit-log` | Complementary. Integrators that need a contract-readable trail of freeze events record them there; this contract only emits events. |
+//!
+//! ## Limits
+//!
+//! `is_frozen()` is advisory. This contract cannot force a consumer to check
+//! it, so a consumer that omits the check gets no protection. Freezing also
+//! does not modify any state in the other contracts: existing balances,
+//! allowlist entries, and denylist entries are left as they are.
+//!
+//! See `SPEC.md` (section 5) for the full security assumptions and
+//! `EVENTS.md` for the event schema.
+//!
 //! ## Storage and TTL policy
 //!
 //! All state (admin, pending admin and the frozen flag) lives in **instance**
