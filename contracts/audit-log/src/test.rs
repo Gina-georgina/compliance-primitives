@@ -403,3 +403,42 @@ fn test_unpause_rejects_non_admin() {
         "unpause must reject a non-admin caller"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Source-auth test — issue #369
+//
+// `record` calls `source.require_auth()`, so authorization from any other
+// address must not be enough to record an entry claiming that source.
+// ---------------------------------------------------------------------------
+
+/// `record` must fail when the only authorization provided belongs to an
+/// address other than the claimed `source`.
+#[test]
+fn test_record_rejects_auth_from_address_other_than_source() {
+    use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+    use soroban_sdk::IntoVal;
+
+    let env = Env::default();
+    let (_admin, contract_id, client) = setup(&env);
+
+    let source = Address::generate(&env);
+    let other = Address::generate(&env);
+    let subject = Address::generate(&env);
+    let kind = Symbol::new(&env, "deny_add");
+    let detail = soroban_sdk::String::from_str(&env, "spoofed source");
+
+    // Replace the blanket mock with an authorization from `other` only.
+    env.mock_auths(&[MockAuth {
+        address: &other,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "record",
+            args: (&source, &kind, &subject, &detail).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = client.try_record(&source, &kind, &subject, &detail);
+    assert!(result.is_err(), "record must fail without the source's auth");
+    assert_eq!(client.entry_count(), 0u64);
+}
