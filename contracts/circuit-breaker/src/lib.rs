@@ -26,8 +26,8 @@
 //! alongside it and call it after `upgrade`. See `STORAGE_VERSIONING.md`.
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, Address, BytesN, Env,
-    String,
+    contract, contractclient, contracterror, contractevent, contractimpl, contracttype, Address,
+    BytesN, Env, String, Symbol,
 };
 
 /// Extend the contract's instance storage when its remaining TTL drops below
@@ -44,6 +44,7 @@ enum DataKey {
     Admin,
     Frozen,
     PendingAdmin,
+    AuditLog,
 }
 
 /// Version + admin metadata about this contract instance, for tooling that
@@ -65,6 +66,11 @@ pub struct Frozen {
 pub struct Unfrozen {
     #[topic]
     pub admin: Address,
+}
+
+#[contractclient(name = "AuditLogClient")]
+pub trait AuditLogInterface {
+    fn record(env: Env, source: Address, kind: Symbol, subject: Address, detail: String);
 }
 
 /// Emitted whenever the contract is upgraded to a new WASM implementation,
@@ -103,6 +109,13 @@ impl CircuitBreaker {
         Ok(())
     }
 
+    /// Configure the optional append-only audit log. Admin-only.
+    pub fn set_audit_log(env: Env, admin: Address, audit_log: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::AuditLog, &audit_log);
+        Ok(())
+    }
+
     pub fn freeze(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         // Idempotency: if already frozen, skip the write and event so that
@@ -122,6 +135,7 @@ impl CircuitBreaker {
             admin: admin.clone(),
         }
         .publish(&env);
+        Self::record_audit(&env, Symbol::new(&env, "freeze"), &admin, "circuit breaker frozen");
         Ok(())
     }
 
@@ -143,6 +157,7 @@ impl CircuitBreaker {
             admin: admin.clone(),
         }
         .publish(&env);
+        Self::record_audit(&env, Symbol::new(&env, "unfreeze"), &admin, "circuit breaker unfrozen");
         Ok(())
     }
 
@@ -257,6 +272,21 @@ impl CircuitBreaker {
             return Err(Error::NotAuthorized);
         }
         Ok(())
+    }
+
+    fn record_audit(env: &Env, kind: Symbol, subject: &Address, detail: &str) {
+        if let Some(audit_log) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::AuditLog)
+        {
+            AuditLogClient::new(env, &audit_log).record(
+                &env.current_contract_address(),
+                &kind,
+                subject,
+                &String::from_str(env, detail),
+            );
+        }
     }
 }
 
