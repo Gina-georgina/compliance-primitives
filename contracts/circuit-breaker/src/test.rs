@@ -162,3 +162,84 @@ fn test_metadata_after_initialization() {
         soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
     );
 }
+
+// ---------------------------------------------------------------------------
+// Resource-fee benchmark (budget regression) — `is_frozen`
+//
+// `is_frozen` is the circuit-breaker's hottest entrypoint: consumers such as
+// `compliance-aggregator` read it on every check. The measured CPU/memory
+// cost is compared against the `[circuit-breaker.is_frozen]` entry in
+// `budget-baselines.toml`; the test (and therefore the `budget-regression` CI
+// job, which runs `cargo test --workspace budget_regression`) fails if either
+// exceeds the baseline by more than 10%.
+// ---------------------------------------------------------------------------
+
+fn read_baseline(path: &std::path::Path, section: &str) -> (u64, u64) {
+    let contents = std::fs::read_to_string(path).unwrap();
+    let section_header = std::format!("[{section}]");
+    let mut in_section = false;
+    let mut cpu = None;
+    let mut memory = None;
+
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_section = trimmed == section_header;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("cpu = ") {
+            cpu = Some(value.replace('_', "").parse::<u64>().unwrap());
+        } else if let Some(value) = trimmed.strip_prefix("memory = ") {
+            memory = Some(value.replace('_', "").parse::<u64>().unwrap());
+        }
+    }
+
+    let cpu = cpu.expect("missing cpu baseline");
+    let memory = memory.expect("missing memory baseline");
+    (cpu, memory)
+}
+
+fn baseline_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("budget-baselines.toml")
+}
+
+fn assert_budget_within_threshold(measured: (u64, u64), baseline: (u64, u64), label: &str) {
+    let (measured_cpu, measured_memory) = measured;
+    let (baseline_cpu, baseline_memory) = baseline;
+    let cpu_limit = (baseline_cpu as f64 * 1.10).ceil() as u64;
+    let memory_limit = (baseline_memory as f64 * 1.10).ceil() as u64;
+
+    assert!(
+        measured_cpu <= cpu_limit,
+        "{label} CPU regression: measured {measured_cpu}, baseline {baseline_cpu}, limit {cpu_limit}"
+    );
+    assert!(
+        measured_memory <= memory_limit,
+        "{label} memory regression: measured {measured_memory}, baseline {baseline_memory}, limit {memory_limit}"
+    );
+}
+
+#[test]
+fn test_budget_regression_is_frozen() {
+    let env = Env::default();
+    let (_admin, client) = setup(&env);
+
+    let mut budget = env.cost_estimate().budget();
+    budget.reset_default();
+    assert!(!client.is_frozen());
+
+    let measured = (budget.cpu_instruction_cost(), budget.memory_bytes_cost());
+    std::println!(
+        "circuit-breaker.is_frozen: cpu = {}, memory = {}",
+        measured.0, measured.1
+    );
+
+    let baseline = read_baseline(&baseline_path(), "circuit-breaker.is_frozen");
+    assert_budget_within_threshold(measured, baseline, "circuit-breaker is_frozen");
+}
