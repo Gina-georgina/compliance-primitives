@@ -10,6 +10,7 @@ members = [
     "contracts/circuit-breaker",
     "contracts/policy-engine",
     "contracts/multisig-admin",
+    "examples/allowlist-token-usage",
     "examples/denylist-gate-consumer",
     "examples/denylist-gate-sep41",
     "examples/jurisdiction-denylist-consumer",
