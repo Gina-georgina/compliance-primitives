@@ -99,6 +99,80 @@ fn test_invalid_threshold_exceeds_signer_count() {
 }
 
 // ---------------------------------------------------------------------------
+// Duplicate-signer rejection in initialize — #610
+// ---------------------------------------------------------------------------
+
+/// `initialize([A, A, B], 3)` would pass the threshold check (3 <= 3) but
+/// `__check_auth` rejects duplicate signature addresses, so at most two
+/// valid signatures are possible and the threshold of 3 can never be met.
+/// The contract and every primitive it governs would be locked permanently.
+#[test]
+fn test_initialize_rejects_duplicate_signers() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(MultisigAdmin, ());
+    let client = MultisigAdminClient::new(&env, &contract_id);
+
+    let addr_a = Address::generate(&env);
+    let addr_b = Address::generate(&env);
+    let signers = vec![&env, addr_a.clone(), addr_a, addr_b];
+    let result = client.try_initialize(&signers, &3);
+    assert_eq!(result, Err(Ok(Error::DuplicateSigner)));
+}
+
+/// Duplicates must be rejected even when the threshold would be valid after
+/// deduplication — the caller should deduplicate before calling.
+#[test]
+fn test_initialize_rejects_duplicates_even_with_valid_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(MultisigAdmin, ());
+    let client = MultisigAdminClient::new(&env, &contract_id);
+
+    let addr_a = Address::generate(&env);
+    let addr_b = Address::generate(&env);
+    // [A, A, B] with threshold 2 — 2 <= 3 raw count, but duplicates make
+    // the effective signer set only {A, B}, so threshold 2 is actually
+    // valid. Still rejected because the caller should deduplicate first.
+    let signers = vec![&env, addr_a.clone(), addr_a, addr_b];
+    let result = client.try_initialize(&signers, &2);
+    assert_eq!(result, Err(Ok(Error::DuplicateSigner)));
+}
+
+/// Distinct signers with a valid threshold must still succeed.
+#[test]
+fn test_initialize_succeeds_with_distinct_signers() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(MultisigAdmin, ());
+    let client = MultisigAdminClient::new(&env, &contract_id);
+
+    let signers = vec![
+        &env,
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+    ];
+    let result = client.try_initialize(&signers, &2);
+    assert!(result.is_ok());
+    assert_eq!(client.get_signers().0.len(), 3);
+    assert_eq!(client.get_threshold(), 2);
+}
+
+/// Single signer (no duplicates) still works.
+#[test]
+fn test_initialize_single_signer_no_duplicates() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(MultisigAdmin, ());
+    let client = MultisigAdminClient::new(&env, &contract_id);
+
+    let signers = vec![&env, Address::generate(&env)];
+    let result = client.try_initialize(&signers, &1);
+    assert!(result.is_ok());
+}
+
+// ---------------------------------------------------------------------------
 // Signer-set management tests
 // ---------------------------------------------------------------------------
 
@@ -787,7 +861,68 @@ fn test_error_discriminants_not_reordered() {
     assert_eq!(Error::ContractPaused as u32, 8);
     assert_eq!(Error::ProposalNotFound as u32, 9);
     assert_eq!(Error::ExpiredProposal as u32, 10);
+    assert_eq!(Error::DuplicateSigner as u32, 11);
     // New — appended after existing codes.
-    assert_eq!(Error::NotASigner as u32, 11);
-    assert_eq!(Error::AlreadyApproved as u32, 12);
+    assert_eq!(Error::NotASigner as u32, 12);
+    assert_eq!(Error::AlreadyApproved as u32, 13);
+}
+
+// ---------------------------------------------------------------------------
+// #615 — stale approvals from removed signers must not count
+// ---------------------------------------------------------------------------
+
+/// After a signer approves then gets removed, their approval must not count
+/// toward the threshold in execute(). The remaining valid approvals must be
+/// sufficient on their own.
+#[test]
+fn test_execute_fails_when_only_approval_is_from_removed_signer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // 3 signers, threshold 2.
+    let (signers, _id, client) = setup_multisig(&env, 3, 2);
+
+    let payload = Bytes::from_array(&env, &[42u8; 32]);
+    let expiry = env.ledger().sequence() + 100;
+    let proposal_id = client.propose(&payload, &expiry);
+
+    let signer0 = signers.get(0).unwrap();
+    let signer1 = signers.get(1).unwrap();
+
+    // Both signer0 and signer1 approve — threshold met at approve() time.
+    client.approve(&proposal_id, &signer0);
+    client.approve(&proposal_id, &signer1);
+
+    // Now remove signer0 (compromised key). Only signer1's approval remains valid.
+    // With threshold=2 and only 1 valid approval, execute() must fail.
+    client.remove_signer(&signer0);
+
+    // Threshold is now 2 but only 1 remaining active signer approved.
+    let result = client.try_execute(&proposal_id);
+    assert_eq!(result, Err(Ok(Error::ThresholdNotMet)));
+}
+
+/// All approvals still active → execute succeeds even after an unrelated
+/// signer is removed.
+#[test]
+fn test_execute_succeeds_when_removed_signer_did_not_approve() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (signers, _id, client) = setup_multisig(&env, 3, 2);
+
+    let payload = Bytes::from_array(&env, &[43u8; 32]);
+    let expiry = env.ledger().sequence() + 100;
+    let proposal_id = client.propose(&payload, &expiry);
+
+    // signer0 and signer1 approve.
+    client.approve(&proposal_id, &signers.get(0).unwrap());
+    client.approve(&proposal_id, &signers.get(1).unwrap());
+
+    // Remove signer2 who never approved — the two valid approvals remain.
+    client.remove_signer(&signers.get(2).unwrap());
+
+    // Should still succeed: 2 valid approvals >= threshold 2.
+    client.execute(&proposal_id);
+
+    let result = client.try_get_proposal(&proposal_id);
+    assert_eq!(result, Err(Ok(Error::ProposalNotFound)));
 }
