@@ -141,3 +141,30 @@ FUZZ_ITERATIONS=2000 FUZZ_OPS=64 \
 Run this after non-trivial changes to `transfer`, `is_allowed`,
 `add_to_allowlist`, or `remove_from_allowlist`, or as part of a release
 checklist.
+
+## compliance-aggregator (`#380`)
+
+Harness: `contracts/compliance-aggregator/src/fuzz.rs`
+
+Each iteration randomly registers the denylist-gate, the jurisdiction-flag, or
+both, applies a random sequence of denylist adds/removes and jurisdiction
+sets over a small address pool, then calls `check_all` on a random batch.
+
+Invariants checked for every returned `AddressCheckResult`:
+
+1. **all_passed consistency** — `all_passed` is `true` iff every individual
+   `CheckResult.passed` is `true`.
+2. **Shape** — one result per input address in input order, with one
+   `CheckResult` per registered check (denylist first, then jurisdiction).
+3. **Model agreement** — each `CheckResult.passed` matches the harness model
+   of the denylist / jurisdiction state.
+
+```sh
+cargo test -p compliance-aggregator fuzz_check_all_combinations -- --nocapture
+
+FUZZ_ITERATIONS=2000 FUZZ_OPS=64 \
+  cargo test -p compliance-aggregator fuzz_check_all_combinations -- --nocapture
+```
+
+Defaults: `FUZZ_ITERATIONS=128`, `FUZZ_OPS=24`. Failures print the failing
+`seed`.
