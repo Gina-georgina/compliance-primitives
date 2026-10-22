@@ -151,6 +151,36 @@ pub struct AdminTransferred {
     pub new_admin: Address,
 }
 
+#[contractevent]
+pub struct Paused {
+    #[topic]
+    pub admin: Address,
+}
+
+#[contractevent]
+pub struct Unpaused {
+    #[topic]
+    pub admin: Address,
+}
+
+#[contractevent]
+pub struct ComplianceOfficerSet {
+    #[topic]
+    pub officer: Address,
+}
+
+#[contractevent]
+pub struct ComplianceOfficerRevoked {
+    #[topic]
+    pub officer: Address,
+}
+
+#[contractevent]
+pub struct AuditLogSet {
+    #[topic]
+    pub audit_log: Address,
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -202,13 +232,24 @@ impl DenylistGate {
     ) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::ComplianceOfficer, &officer);
+        ComplianceOfficerSet {
+            officer: officer.clone(),
+        }
+        .publish(&env);
         Ok(())
     }
 
     /// Revoke the compliance-officer role. Admin-only.
     pub fn revoke_compliance_officer(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
-        env.storage().instance().remove(&DataKey::ComplianceOfficer);
+        if let Some(officer) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::ComplianceOfficer)
+        {
+            env.storage().instance().remove(&DataKey::ComplianceOfficer);
+            ComplianceOfficerRevoked { officer }.publish(&env);
+        }
         Ok(())
     }
 
@@ -221,6 +262,10 @@ impl DenylistGate {
     pub fn set_audit_log(env: Env, admin: Address, audit_log: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::AuditLog, &audit_log);
+        AuditLogSet {
+            audit_log: audit_log.clone(),
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -314,6 +359,10 @@ impl DenylistGate {
     pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Paused, &true);
+        Paused {
+            admin: admin.clone(),
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -321,6 +370,10 @@ impl DenylistGate {
     pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Paused, &false);
+        Unpaused {
+            admin: admin.clone(),
+        }
+        .publish(&env);
         Ok(())
     }
 

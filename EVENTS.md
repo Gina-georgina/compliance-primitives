@@ -157,6 +157,75 @@ data   : {}
 | `old_admin` | `Address` | topic | Admin before the transfer (loses all privileges immediately) |
 | `new_admin` | `Address` | topic | Admin after the transfer |
 
+#### `Paused`
+
+Emitted when the admin pauses denylist mutations via `pause(admin)`.
+
+```
+topics : ["paused", <admin: Address>]
+data   : {}
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `admin` | `Address` | topic | Admin address that paused the contract |
+
+#### `Unpaused`
+
+Emitted when the admin resumes denylist mutations via `unpause(admin)`.
+
+```
+topics : ["unpaused", <admin: Address>]
+data   : {}
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `admin` | `Address` | topic | Admin address that unpaused the contract |
+
+#### `ComplianceOfficerSet`
+
+Emitted when `set_compliance_officer(admin, officer)` assigns the
+compliance-officer role. Replaces any previously assigned officer.
+
+```
+topics : ["compliance_officer_set", <officer: Address>]
+data   : {}
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `officer` | `Address` | topic | Address newly assigned the compliance-officer role |
+
+#### `ComplianceOfficerRevoked`
+
+Emitted when `revoke_compliance_officer(admin)` removes an assigned
+compliance officer. Not emitted if no officer was assigned (the call is a
+no-op).
+
+```
+topics : ["compliance_officer_revoked", <officer: Address>]
+data   : {}
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `officer` | `Address` | topic | Address whose compliance-officer role was revoked |
+
+#### `AuditLogSet`
+
+Emitted when `set_audit_log(admin, audit_log)` configures the append-only
+audit log contract that receives denylist mutation records.
+
+```
+topics : ["audit_log_set", <audit_log: Address>]
+data   : {}
+```
+
+| Field | Type | Placement | Description |
+|---|---|---|---|
+| `audit_log` | `Address` | topic | Audit-log contract address now receiving records |
+
 ---
 
 ### `jurisdiction-flag`
