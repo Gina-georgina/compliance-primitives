@@ -10,7 +10,7 @@
 //! orders, etc.), decoupled from any single token contract's own storage.
 //!
 //! **Callers**: an `admin` address manages the denylist through
-//! `add_to_denylist`/`remove_from_denylist`. Other contracts — typically a
+//! `add_to_denylist`/`remove_from_denylist`/`remove_multiple_from_denylist`. Other contracts — typically a
 //! token's `transfer` function — call the read-only `check(address)` via a
 //! cross-contract call before moving funds, so the denylist can be updated
 //! without redeploying or touching the token contract itself.
@@ -23,6 +23,13 @@
 //!
 //! The contract starts in single-admin mode: `admin` (set in `initialize`)
 //! authorizes every denylist mutation via `require_auth()`.
+//!
+//! Denylist entry mutations (`add_to_denylist`, `remove_from_denylist`, and
+//! `remove_multiple_from_denylist`) also accept the compliance officer, if one
+//! is set. Single and batch removal share the same authority check, so an
+//! officer never needs admin rights to do a batch what it can do one by one.
+//! Officer assignment, audit-log configuration, pause, and signer governance
+//! remain admin-only.
 //!
 //! `initialize_multisig` (admin-only, callable once) additionally installs an
 //! M-of-N signer set. From then on the signer set is governed as follows:
@@ -39,7 +46,14 @@
 //!   approved it.
 //! - Removals are validated before an approval is recorded: the set can never
 //!   shrink to empty, nor below the threshold (`InvalidSignerSet` /
-//!   `InvalidThreshold`).
+//!   `InvalidThreshold`). To remove a signer from a set that is already at its
+//!   threshold, lower the threshold first.
+//! - `set_threshold` goes through the same approval flow. Each call records an
+//!   approval of `SetThreshold(n)`, applied once `threshold` distinct current
+//!   signers have approved it. When applied, `n` must satisfy
+//!   `1 <= n <= signers.len()` (`InvalidThreshold`), and a `ThresholdChanged`
+//!   event is emitted. The threshold can therefore be raised or lowered, e.g. a
+//!   3-of-3 set can lower to 2-of-3 and then remove a lost key.
 #![no_std]
 
 use soroban_sdk::{
@@ -98,6 +112,7 @@ pub struct SignerSet {
 pub enum SignerAction {
     Add(Address),
     Remove(Address),
+    SetThreshold(u32),
 }
 
 #[contractclient(name = "AuditLogClient")]
@@ -119,6 +134,16 @@ pub struct DenyAdd {
 pub struct DenyRemove {
     #[topic]
     pub address: Address,
+}
+
+/// Emitted when the optional audit-log write fails (paused, archived, or
+/// reverting). The denylist mutation itself still succeeds; see
+/// `docs/fail-open-fail-closed-audit.md`.
+#[contractevent]
+pub struct AuditLogFailed {
+    pub kind: Symbol,
+    #[topic]
+    pub subject: Address,
 }
 
 #[contractevent]
@@ -146,11 +171,47 @@ pub struct SignerRemoved {
 }
 
 #[contractevent]
+pub struct ThresholdChanged {
+    pub old_threshold: u32,
+    pub new_threshold: u32,
+}
+
+#[contractevent]
 pub struct AdminTransferred {
     #[topic]
     pub old_admin: Address,
     #[topic]
     pub new_admin: Address,
+}
+
+#[contractevent]
+pub struct Paused {
+    #[topic]
+    pub admin: Address,
+}
+
+#[contractevent]
+pub struct Unpaused {
+    #[topic]
+    pub admin: Address,
+}
+
+#[contractevent]
+pub struct ComplianceOfficerSet {
+    #[topic]
+    pub officer: Address,
+}
+
+#[contractevent]
+pub struct ComplianceOfficerRevoked {
+    #[topic]
+    pub officer: Address,
+}
+
+#[contractevent]
+pub struct AuditLogSet {
+    #[topic]
+    pub audit_log: Address,
 }
 
 // ---------------------------------------------------------------------------
@@ -206,13 +267,24 @@ impl DenylistGate {
     ) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::ComplianceOfficer, &officer);
+        ComplianceOfficerSet {
+            officer: officer.clone(),
+        }
+        .publish(&env);
         Ok(())
     }
 
     /// Revoke the compliance-officer role. Admin-only.
     pub fn revoke_compliance_officer(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
-        env.storage().instance().remove(&DataKey::ComplianceOfficer);
+        if let Some(officer) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::ComplianceOfficer)
+        {
+            env.storage().instance().remove(&DataKey::ComplianceOfficer);
+            ComplianceOfficerRevoked { officer }.publish(&env);
+        }
         Ok(())
     }
 
@@ -225,6 +297,10 @@ impl DenylistGate {
     pub fn set_audit_log(env: Env, admin: Address, audit_log: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::AuditLog, &audit_log);
+        AuditLogSet {
+            audit_log: audit_log.clone(),
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -266,6 +342,18 @@ impl DenylistGate {
         }
         env.storage().instance().remove(&DataKey::PendingAdmin);
         Ok(())
+    }
+
+    /// Disconnect the audit log so denylist mutations stop calling it. Admin-only.
+    pub fn clear_audit_log(env: Env, admin: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().remove(&DataKey::AuditLog);
+        Ok(())
+    }
+
+    /// Return the currently configured audit-log address, if any.
+    pub fn get_audit_log(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::AuditLog)
     }
 
     /// Reassign the admin role to `new_admin` immediately. Requires auth from
@@ -362,6 +450,10 @@ impl DenylistGate {
     pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Paused, &true);
+        Paused {
+            admin: admin.clone(),
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -369,6 +461,10 @@ impl DenylistGate {
     pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Paused, &false);
+        Unpaused {
+            admin: admin.clone(),
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -416,14 +512,14 @@ impl DenylistGate {
         Ok(())
     }
 
-    /// Remove every address in `addresses` from the denylist. Admin-only.
+    /// Remove every address in `addresses` from the denylist. Admin or compliance-officer.
     pub fn remove_multiple_from_denylist(
         env: Env,
         admin: Address,
         addresses: Vec<Address>,
     ) -> Result<(), Error> {
         Self::reject_if_paused(&env)?;
-        Self::require_admin(&env, &admin)?;
+        Self::require_compliance_authority(&env, &admin)?;
         if addresses.len() > MAX_BATCH_SIZE {
             return Err(Error::BatchTooLarge);
         }
@@ -539,6 +635,16 @@ impl DenylistGate {
         Self::approve(&env, caller, SignerAction::Remove(signer_to_remove), signer_set)
     }
 
+    /// Approve changing the signing threshold to `new_threshold`. `caller` must
+    /// authorize the call and be in the current signer set. The threshold is
+    /// changed once `threshold` distinct signers have approved this exact
+    /// action; `new_threshold` must be between 1 and the signer count at that
+    /// point.
+    pub fn set_threshold(env: Env, caller: Address, new_threshold: u32) -> Result<(), Error> {
+        let signer_set = Self::require_signer(&env, &caller)?;
+        Self::approve(&env, caller, SignerAction::SetThreshold(new_threshold), signer_set)
+    }
+
     /// The current signer set, or empty when multisig is not enabled.
     pub fn signers(env: Env) -> Vec<Address> {
         env.storage()
@@ -620,6 +726,19 @@ impl DenylistGate {
                 env.storage().instance().set(&DataKey::SignerSet, &signer_set);
                 SignerRemoved { signer: removed }.publish(env);
             }
+            SignerAction::SetThreshold(new_threshold) => {
+                if new_threshold == 0 || new_threshold > signer_set.signers.len() {
+                    return Err(Error::InvalidThreshold);
+                }
+                let old_threshold = signer_set.threshold;
+                signer_set.threshold = new_threshold;
+                env.storage().instance().set(&DataKey::SignerSet, &signer_set);
+                ThresholdChanged {
+                    old_threshold,
+                    new_threshold,
+                }
+                .publish(env);
+            }
         }
         Ok(())
     }
@@ -655,18 +774,30 @@ impl DenylistGate {
         Err(Error::NotAuthorized)
     }
 
+    /// Best-effort audit write. A paused, archived, or reverting audit-log must
+    /// not block denylist mutations (fail-open on the audit dependency), so
+    /// failures are surfaced as an `AuditLogFailed` event instead of reverting.
     fn record_audit(env: &Env, kind: Symbol, subject: &Address, detail: &str) {
         if let Some(audit_log) = env
             .storage()
             .instance()
             .get::<DataKey, Address>(&DataKey::AuditLog)
         {
-            AuditLogClient::new(env, &audit_log).record(
-                &env.current_contract_address(),
-                &kind,
-                subject,
-                &String::from_str(env, detail),
-            );
+            let written = AuditLogClient::new(env, &audit_log)
+                .try_record(
+                    &env.current_contract_address(),
+                    &kind,
+                    subject,
+                    &String::from_str(env, detail),
+                )
+                .is_ok_and(|inner| inner.is_ok());
+            if !written {
+                AuditLogFailed {
+                    kind,
+                    subject: subject.clone(),
+                }
+                .publish(env);
+            }
         }
     }
 
